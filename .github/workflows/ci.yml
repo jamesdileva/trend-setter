@@ -22,7 +22,7 @@ jobs:
       - run: python scripts/repo_checks.py
 
   engine:
-    name: Engine (ruff + pytest)
+    name: Engine (ruff + mypy + pytest)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -37,4 +37,25 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -e ".[dev]"
       - run: python -m ruff check .
+      - run: python -m mypy
       - run: python -m pytest
+
+  desktop:
+    name: Desktop (typecheck + vitest)
+    runs-on: ubuntu-latest
+    env:
+      # The shell is not launched in CI; skip the Electron binary download.
+      ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
