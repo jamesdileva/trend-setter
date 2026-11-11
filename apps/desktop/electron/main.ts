@@ -8,9 +8,10 @@
  * background-running policy is a later, deliberate decision).
  */
 
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, ipcMain, shell } from "electron";
 import path from "node:path";
 import { EngineSupervisor } from "./process-manager";
+import { isAllowedExternalUrl } from "./urls";
 
 let mainWindow: BrowserWindow | null = null;
 let supervisor: EngineSupervisor | null = null;
@@ -54,6 +55,25 @@ if (!gotLock) {
     ipcMain.handle("engine:get-status", () => supervisor?.getStatus() ?? null);
     ipcMain.handle("engine:start", () => supervisor?.start());
     ipcMain.handle("engine:stop", () => supervisor?.stop());
+
+    // Coinbase wizard: the renderer never holds the session token — the
+    // main process performs the engine requests on its behalf.
+    ipcMain.handle("coinbase:get-status", () => supervisor?.engineRequest("/coinbase/connection"));
+    ipcMain.handle("coinbase:connect", (_event, payload: { keyName: string; privateKeyPem: string }) =>
+      supervisor?.engineRequest("/coinbase/credentials", "POST", {
+        key_name: payload.keyName,
+        private_key_pem: payload.privateKeyPem,
+      }),
+    );
+    ipcMain.handle("coinbase:test", () => supervisor?.engineRequest("/coinbase/test-connection", "POST"));
+    ipcMain.handle("coinbase:disconnect", () => supervisor?.engineRequest("/coinbase/disconnect", "POST"));
+
+    ipcMain.handle("shell:open-external", (_event, url: string) => {
+      if (!isAllowedExternalUrl(url)) {
+        throw new Error("This link is not on the allowed list.");
+      }
+      return shell.openExternal(url);
+    });
 
     void supervisor.start();
     createWindow();

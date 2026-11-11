@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { EngineStatus } from "../types/electron";
 import { getDesktopApi } from "../services/desktopApi";
+import { ConnectionCard } from "../components/ConnectionCard";
 
 const STATE_LABELS: Record<EngineStatus["state"], string> = {
   stopped: "Engine stopped",
@@ -70,6 +71,8 @@ export function App() {
           </button>
         </div>
       </section>
+
+      <ConnectionCard />
 
       <footer className="app-footer">
         Paper mode by default. No real orders are placed. Live trading is a separate, deliberate

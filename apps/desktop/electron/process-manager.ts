@@ -38,6 +38,12 @@ const DEFAULT_PORT = 8788;
 const POLL_INTERVAL_MS = 2000;
 const HEALTH_TIMEOUT_MS = 1500;
 const STOP_TIMEOUT_MS = 10_000;
+const ENGINE_REQUEST_TIMEOUT_MS = 10_000;
+
+export interface EngineResponse {
+  status: number;
+  body: unknown;
+}
 
 export function resolveEngineSpawnConfig(options: {
   repoRoot: string;
@@ -80,6 +86,37 @@ export class EngineSupervisor {
 
   getStatus(): EngineStatus {
     return this.status;
+  }
+
+  /**
+   * Authenticated request to the engine's local API, on behalf of the UI.
+   * The session token stays in this (main) process — it never reaches the
+   * renderer, and responses are passed through unchanged.
+   */
+  async engineRequest(
+    path: string,
+    method: "GET" | "POST" = "GET",
+    body?: unknown,
+  ): Promise<EngineResponse> {
+    const response = await fetch(`${this.baseUrl}${path}`, {
+      method,
+      headers: {
+        "X-Local-Token": this.token,
+        "Content-Type": "application/json",
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(ENGINE_REQUEST_TIMEOUT_MS),
+    });
+    const text = await response.text();
+    let parsed: unknown = null;
+    if (text) {
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        parsed = text;
+      }
+    }
+    return { status: response.status, body: parsed };
   }
 
   async start(): Promise<EngineStatus> {

@@ -127,6 +127,49 @@ body {
   filter: brightness(1.1);
 }
 
+.controls .danger {
+  background: var(--bad);
+}
+
+.wizard-steps {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+  padding-left: 20px;
+}
+
+.credential-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.credential-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.credential-form input,
+.credential-form textarea {
+  background: #12151c;
+  color: var(--text);
+  border: 1px solid #262d3d;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-family: Consolas, monospace;
+  resize: vertical;
+}
+
+.credential-form input:focus,
+.credential-form textarea:focus {
+  outline: 1px solid var(--accent);
+}
+
 .app-footer {
   color: var(--muted);
   font-size: 12px;
