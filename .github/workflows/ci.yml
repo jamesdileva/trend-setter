@@ -24,7 +24,6 @@ jobs:
   engine:
     name: Engine (ruff + pytest)
     runs-on: ubuntu-latest
-    if: ${{ hashFiles('engine/**/*.py') != '' }}
     defaults:
       run:
         working-directory: engine
