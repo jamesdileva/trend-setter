@@ -18,3 +18,22 @@ class CredentialRequest(BaseModel):
         max_length=20000,
         description="ECDSA (ES256) private key PEM. Never stored outside the OS secret store.",
     )
+
+
+class StrategyConfigRequest(BaseModel):
+    """Baseline strategy parameters (baseline defaults; not recommendations)."""
+
+    product_id: str = Field(description="Product the strategy instance evaluates, e.g. BTC-USD")
+    timeframe: str = Field(description="Decision timeframe, e.g. 1h")
+    fast_ema_period: int = Field(default=20, ge=2, le=400)
+    slow_ema_period: int = Field(default=50, ge=2, le=400)
+    rsi_period: int = Field(default=14, ge=2, le=200)
+    rsi_entry_ceiling: float = Field(default=70.0, gt=0, lt=100)
+    rsi_exit_floor: float | None = Field(default=None, gt=0, lt=100)
+
+
+class StrategyEvaluateRequest(BaseModel):
+    """Evaluate the active config against stored candles (overrides optional)."""
+
+    product_id: str | None = None
+    timeframe: str | None = None

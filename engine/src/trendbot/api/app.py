@@ -33,12 +33,20 @@ from sqlalchemy import select
 from starlette.middleware.base import RequestResponseEndpoint
 
 from trendbot import __version__
-from trendbot.api.schemas import CredentialRequest
+from trendbot.api.schemas import (
+    CredentialRequest,
+    StrategyConfigRequest,
+    StrategyEvaluateRequest,
+)
 from trendbot.application.coinbase_connection import (
     CoinbaseConnectionService,
     default_client_factory,
 )
 from trendbot.application.state import EngineRuntime
+from trendbot.application.strategy_engine import (
+    StrategyEngine,
+    StrategyNotConfiguredError,
+)
 from trendbot.database.models import EngineEvent
 from trendbot.database.session import Database
 from trendbot.security.secret_store import SecretStore
@@ -81,6 +89,7 @@ def create_app(
         secret_store=secret_store,
         client_factory=default_client_factory(coinbase_transport),
     )
+    strategy_engine = StrategyEngine(database)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -247,5 +256,72 @@ def create_app(
         if market_status_provider is None:
             return {"running": False, "state": "not_wired"}
         return {"running": True, **market_status_provider()}
+
+    @app.post("/strategy/config", dependencies=[Depends(require_local_token)])
+    def save_strategy_config(payload: StrategyConfigRequest) -> JSONResponse:
+        """Validate and store a new active strategy config version."""
+        try:
+            result = strategy_engine.set_config(
+                product_id=payload.product_id,
+                timeframe=payload.timeframe,
+                fast_ema_period=payload.fast_ema_period,
+                slow_ema_period=payload.slow_ema_period,
+                rsi_period=payload.rsi_period,
+                rsi_entry_ceiling=payload.rsi_entry_ceiling,
+                rsi_exit_floor=payload.rsi_exit_floor,
+            )
+        except Exception as exc:  # noqa: BLE001 - plain-language validation errors
+            return JSONResponse(
+                status_code=400,
+                content={"status": "invalid_config", "message": str(exc)},
+            )
+        return JSONResponse(status_code=200, content=result)
+
+    @app.get("/strategy/current", dependencies=[Depends(require_local_token)])
+    def current_strategy() -> dict[str, object]:
+        """The active strategy configuration, or not-configured status."""
+        config = strategy_engine.current_config()
+        if config is None:
+            return {"configured": False}
+        return {
+            "configured": True,
+            "config": {
+                "product_id": config.product_id,
+                "timeframe": config.timeframe,
+                "fast_ema_period": config.fast_ema_period,
+                "slow_ema_period": config.slow_ema_period,
+                "rsi_period": config.rsi_period,
+                "rsi_entry_ceiling": config.rsi_entry_ceiling,
+                "rsi_exit_floor": config.rsi_exit_floor,
+                "config_hash": config.config_hash(),
+            },
+            "recent_signals": strategy_engine.recent_signals(config.product_id, config.timeframe),
+        }
+
+    @app.post("/strategy/evaluate", dependencies=[Depends(require_local_token)])
+    def evaluate_strategy(payload: StrategyEvaluateRequest) -> JSONResponse:
+        """Evaluate the active strategy over stored candles (evidence only)."""
+        try:
+            decision = strategy_engine.evaluate(payload.product_id, payload.timeframe)
+        except StrategyNotConfiguredError as exc:
+            return JSONResponse(
+                status_code=409,
+                content={"status": "not_configured", "message": str(exc)},
+            )
+        return JSONResponse(
+            status_code=200,
+            content={
+                "signal": decision.signal.value,
+                "product_id": decision.product_id,
+                "timeframe": decision.timeframe,
+                "candle_time": _iso(decision.candle_time),
+                "reason_code": decision.reason_code,
+                "explanation": decision.explanation,
+                "indicator_values": decision.indicator_values,
+                "strategy_name": decision.strategy_name,
+                "strategy_version": decision.strategy_version,
+                "config_hash": decision.config_hash,
+            },
+        )
 
     return app

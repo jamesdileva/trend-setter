@@ -20,11 +20,14 @@ from trendbot.database.models import (
     CandleRecord,
     EngineEvent,
     FillRecord,
+    Signal,
+    StrategyConfig,
     utc_now,
 )
 from trendbot.database.session import Database
 from trendbot.exchange.types import Fill
 from trendbot.market_data.candles import Candle
+from trendbot.strategies.decisions import StrategyDecision
 
 
 def fill_entry_key(fill: Fill) -> str:
@@ -234,3 +237,118 @@ class SettingsRepository:
         )
         with self._db.session() as session:
             session.execute(statement)
+
+
+class StrategyConfigRepository:
+    """Versioned strategy configurations with a single active version."""
+
+    def __init__(self, database: Database) -> None:
+        self._db = database
+
+    def get_active(self, name: str) -> StrategyConfig | None:
+        with self._db.session() as session:
+            return session.scalars(
+                select(StrategyConfig)
+                .where(StrategyConfig.name == name, StrategyConfig.is_active.is_(True))
+                .order_by(StrategyConfig.version.desc())
+                .limit(1)
+            ).first()
+
+    def get_by_hash(self, name: str, config_hash: str) -> StrategyConfig | None:
+        with self._db.session() as session:
+            return session.scalars(
+                select(StrategyConfig).where(
+                    StrategyConfig.name == name,
+                    StrategyConfig.config_hash == config_hash,
+                )
+            ).first()
+
+    def save_active(
+        self, name: str, config_json: dict[str, Any], config_hash: str
+    ) -> StrategyConfig:
+        """Store a new active version; identical content reactivates its row.
+
+        Previous versions stay as history. Re-saving identical content does
+        not create a duplicate row (same content = same version).
+        """
+        with self._db.session() as session:
+            existing = session.scalars(
+                select(StrategyConfig).where(
+                    StrategyConfig.name == name,
+                    StrategyConfig.config_hash == config_hash,
+                )
+            ).first()
+            for row in session.scalars(
+                select(StrategyConfig).where(
+                    StrategyConfig.name == name, StrategyConfig.is_active.is_(True)
+                )
+            ):
+                row.is_active = False
+            if existing is not None:
+                existing.is_active = True
+                return existing
+            latest_version = session.scalar(
+                select(func.max(StrategyConfig.version)).where(StrategyConfig.name == name)
+            )
+            row = StrategyConfig(
+                name=name,
+                version=int(latest_version or 0) + 1,
+                config_hash=config_hash,
+                config_json=config_json,
+                is_active=True,
+            )
+            session.add(row)
+            session.flush()
+            return row
+
+
+class SignalRepository:
+    """Signal persistence, idempotent per candle (uq_signal_per_candle)."""
+
+    def __init__(self, database: Database) -> None:
+        self._db = database
+
+    def record(self, decision: StrategyDecision, strategy_config_id: int) -> int | None:
+        """Store one decision; returns None when this candle already has one."""
+        from datetime import UTC, datetime
+
+        from trendbot.market_data.granularity import granularity_for_timeframe
+
+        with self._db.session() as session:
+            existing = session.scalar(
+                select(Signal.id).where(
+                    Signal.product_id == decision.product_id,
+                    Signal.granularity == granularity_for_timeframe(decision.timeframe),
+                    Signal.config_hash == decision.config_hash,
+                    Signal.candle_start_time == decision.candle_time,
+                )
+            )
+            if existing is not None:
+                return None
+            row = Signal(
+                product_id=decision.product_id,
+                granularity=granularity_for_timeframe(decision.timeframe),
+                strategy_config_id=strategy_config_id,
+                candle_start_time=decision.candle_time,
+                decision=decision.signal.value,
+                reason_code=decision.reason_code,
+                explanation=decision.explanation,
+                indicator_values=dict(decision.indicator_values),
+                strategy_version=decision.strategy_version,
+                config_hash=decision.config_hash,
+                decided_at=datetime.now(UTC),
+            )
+            session.add(row)
+            session.flush()
+            return int(row.id)
+
+    def recent(self, product_id: str, granularity: str, limit: int = 20) -> list[Signal]:
+        with self._db.session() as session:
+            return list(
+                session.scalars(
+                    select(Signal)
+                    .where(Signal.product_id == product_id, Signal.granularity == granularity)
+                    .order_by(Signal.candle_start_time.desc(), Signal.id.desc())
+                    .limit(limit)
+                ).all()
+            )

@@ -157,7 +157,18 @@ class Signal(Base):
     config_hash: Mapped[str] = mapped_column(String)
     decided_at: Mapped[datetime] = mapped_column(UtcDateTime, default=utc_now)
 
-    __table_args__ = (Index("ix_signals_product_time", "product_id", "candle_start_time"),)
+    __table_args__ = (
+        Index("ix_signals_product_time", "product_id", "candle_start_time"),
+        # One signal per strategy-config content per candle: repeated
+        # evaluation of the same candle never duplicates rows (Sprint 6).
+        UniqueConstraint(
+            "product_id",
+            "granularity",
+            "config_hash",
+            "candle_start_time",
+            name="uq_signal_per_candle",
+        ),
+    )
 
 
 class OrderIntent(Base):
