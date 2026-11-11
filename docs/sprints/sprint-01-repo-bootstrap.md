@@ -1,7 +1,7 @@
 # Sprint 01 — Repository bootstrap and best-practice scaffolding
 
 - **Roadmap sprint:** first slice of Sprint 1 (repository, test runner, CI); also creates the Sprint 0 doc artifacts (risk register, verification checklist, version matrix, ADRs)
-- **Status:** In progress
+- **Status:** Done
 - **Date:** 2026-11-11
 
 ## Goal
@@ -24,8 +24,8 @@ Out of scope: Electron shell, FastAPI loopback API, supervisor, database layer (
 - [x] Engine tests pass on a clean venv
 - [x] Lint passes (ruff)
 - [x] Repo checks pass (secrets/docs)
-- [ ] CI green on GitHub after first push
-- [ ] Public repo created: `jamesdileva/trend-setter`
+- [x] CI green on GitHub after first push
+- [x] Public repo created: `jamesdileva/trend-setter`
 
 ## Verification
 
@@ -35,8 +35,11 @@ Commands run (Python 3.14.3, fresh `.venv`):
 - `python -m pytest` (in `engine/`) — **46 passed**
 - `python -m ruff check .` (in `engine/`) — all checks passed (after fixing 1 E501 and 1 import-order finding)
 - `python scripts/repo_checks.py` — OK: 30 files scanned, no secrets, all links and required files present
+- CI on GitHub: run [43081630719](https://github.com/jamesdileva/trend-setter/actions/runs/43081630719) — **green** (repo hygiene + engine jobs)
 
 ## Deviations & follow-ups
 
 - Roadmap Sprint 0 Coinbase verification items are seeded in [`../coinbase-verification-checklist.md`](../coinbase-verification-checklist.md) but deliberately **not yet verified** — they need official-doc research before the Coinbase integration sprint.
 - Remaining Sprint 1 work: Electron + React shell, FastAPI loopback API, supervisor skeleton, shared version/build metadata, fake exchange adapter interface.
+- Incident: first CI run (43081208501) failed at startup — GitHub rejects `hashFiles()` in a job-level `if` (workflow parse-time validation). Fix: removed the job gate (`fix(ci)` commit); use step-level `if` when conditional engine testing is needed again.
+- Incident: initial push was rejected because the stored Git Credential Manager token lacked the `workflow` scope required to push `.github/workflows/` files. Fix: erased the stale credential; GCM re-authorized with full scopes.
