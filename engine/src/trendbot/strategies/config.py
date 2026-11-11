@@ -109,7 +109,8 @@ def _is_number(value: object) -> bool:
 
 
 def _check_period(label: str, value: object, minimum: int, maximum: int) -> list[str]:
-    if not _is_int(value):
+    # Inline narrowing (not _is_int) so type checkers see value as int here.
+    if not isinstance(value, int) or isinstance(value, bool):
         return [f"The {label} must be a whole number between {minimum} and {maximum}."]
     if not minimum <= value <= maximum:
         return [f"The {label} must be between {minimum} and {maximum}."]
