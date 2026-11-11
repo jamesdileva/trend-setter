@@ -2,17 +2,90 @@
 
 **Purpose:** Sprint 0 requires verifying every assumed Coinbase capability against current official documentation before implementation. No unsupported API behavior may be treated as fact — see Sprint 0 in [`sprint-roadmap.md`](../sprint-roadmap.md) and §21 of [`architecture.md`](../architecture.md).
 
-For each item: record the official doc you verified against, the verification date, and where a test plan covers the behavior.
+**Method:** every row below was verified by fetching the current official Coinbase Developer Platform documentation (`docs.cdp.coinbase.com`) on **2026-11-11**. The docs were reorganized recently: guides now live under `/coinbase-app/...` and the API reference under `/api-reference/advanced-trade-api/...`. Mintlify pages were fetched with a `.md` suffix for stable extraction.
 
-| # | Capability to verify | Official reference | Verified on | Test plan |
-|---|---|---|---|---|
-| 1 | CDP API key creation and authentication requirements | _pending_ | | |
-| 2 | Required key permissions for account reads, market data, trading | _pending_ | | |
-| 3 | Current REST and WebSocket endpoints/channels | _pending_ | | |
-| 4 | Supported candle granularities and historical candle limits | _pending_ | | |
-| 5 | Product increments, minimum sizes, order types | _pending_ | | |
-| 6 | Client order ID semantics and duplicate handling | _pending_ | | |
-| 7 | Rate limits and retry guidance | _pending_ | | |
-| 8 | Protective and trailing order type availability/behavior | _pending_ | | |
+## Verification status
 
-**Exit rule:** no sprint that touches the live Coinbase adapter may start while any row above is unverified, unless the sprint roadmap explicitly records the deferral.
+| # | Capability to verify | Status | Official reference | Verified on | Test plan |
+|---|---|---|---|---|---|
+| 1 | CDP API key creation and authentication requirements | ✅ Verified | [api-key-authentication](https://docs.cdp.coinbase.com/coinbase-app/authentication-authorization/api-key-authentication.md), [websocket-authentication](https://docs.cdp.coinbase.com/coinbase-app/advanced-trade-apis/websocket/websocket-authentication.md), [jwt-authentication](https://docs.cdp.coinbase.com/get-started/authentication/jwt-authentication.md) | 2026-11-11 | Adapter auth unit tests: JWT header/claim shape, 120 s expiry, per-request/per-message regeneration; fixtures against sample keys |
+| 2 | Required key permissions for account reads, market data, trading | ✅ Verified | [authorization](https://docs.cdp.coinbase.com/coinbase-app/authentication-authorization/authorization.md), [rest-scopes](https://docs.cdp.coinbase.com/coinbase-app/advanced-trade-apis/rest-scopes.md) | 2026-11-11 | Permission-mismatch tests: view-only key passes reads, rejects orders; connection wizard checks scope sufficiency |
+| 3 | Current REST and WebSocket endpoints/channels | ✅ Verified | [rest-api introduction](https://docs.cdp.coinbase.com/api-reference/advanced-trade-api/rest-api/introduction.md), [websocket-endpoints](https://docs.cdp.coinbase.com/coinbase-app/advanced-trade-apis/websocket/websocket-endpoints.md), [websocket guide](https://docs.cdp.coinbase.com/coinbase-app/advanced-trade-apis/guides/websocket) | 2026-11-11 | Adapter integration tests against mocked HTTP/WS fixtures using the exact documented paths, hosts, and channel names |
+| 4 | Supported candle granularities and historical candle limits | ✅ Verified | [get-product-candles](https://docs.cdp.coinbase.com/api-reference/advanced-trade-api/rest-api/products/get-product-candles.md), [get-public-product-candles](https://docs.cdp.coinbase.com/api-reference/advanced-trade-api/rest-api/public/get-public-product-candles.md), [ws candles](https://docs.cdp.coinbase.com/api-reference/advanced-trade-api/websocket/candles.md) | 2026-11-11 | Candle-ingestion fixtures: all 5 roadmap timeframes native; 350-candle window paging; OHLCV validation against documented field set |
+| 5 | Product increments, minimum sizes, order types | ✅ Verified | [get-product](https://docs.cdp.coinbase.com/api-reference/advanced-trade-api/rest-api/products/get-product.md), [create-order](https://docs.cdp.coinbase.com/api-reference/advanced-trade-api/rest-api/orders/create-order.md) | 2026-11-11 | Sizing unit tests pinned to documented field names (`base_increment`, `base_min_size`, …); order-configuration enum tests |
+| 6 | Client order ID semantics and duplicate handling | ✅ Verified | [create-order](https://docs.cdp.coinbase.com/api-reference/advanced-trade-api/rest-api/orders/create-order.md), [get-order](https://docs.cdp.coinbase.com/api-reference/advanced-trade-api/rest-api/orders/get-order.md), [list-fills](https://docs.cdp.coinbase.com/api-reference/advanced-trade-api/rest-api/orders/list-fills.md) | 2026-11-11 | Duplicate-submission recovery tests: reuse returns existing order (`DUPLICATE_CLIENT_ORDER_ID`); fill reconciliation keyed on `order_id` (fills omit `client_order_id`) |
+| 7 | Rate limits and retry guidance | ✅ Verified | [rate-limiting](https://docs.cdp.coinbase.com/coinbase-app/api-architecture/rate-limiting.md), [websocket-rate-limits](https://docs.cdp.coinbase.com/coinbase-app/advanced-trade-apis/websocket/websocket-rate-limits.md) | 2026-11-11 | Backoff tests: 429 handling (`rate_limit_exceeded`), WS reconnect under the 8/s-per-IP limit |
+| 8 | Protective and trailing order type availability/behavior | ✅ Verified | [create-order](https://docs.cdp.coinbase.com/api-reference/advanced-trade-api/rest-api/orders/create-order.md), [cancel-order](https://docs.cdp.coinbase.com/api-reference/advanced-trade-api/rest-api/orders/cancel-order.md), [edit-order](https://docs.cdp.coinbase.com/api-reference/advanced-trade-api/rest-api/orders/edit-order.md) | 2026-11-11 | Protective-order state tests: stop-limit GTC/GTD, bracket via `trigger_bracket_gtc` + `attached_order_configuration`; no trailing-stop assumption anywhere |
+
+## Verified findings (facts the adapter must encode)
+
+### Authentication & keys (items 1–2)
+
+- Keys are created on the Coinbase Developer Platform portal (`portal.cdp.coinbase.com` → API Keys → **Secret API Keys**); key material is downloaded as a key file from the creation modal. One CDP key serves REST and WebSocket.
+- Key name format: `organizations/{org_id}/apiKeys/{key_id}` (name 64 chars, secret 128 chars). Whether the segments are UUIDs is **not documented** — do not assume.
+- The private key is **ECDSA EC PEM** (`-----BEGIN EC PRIVATE KEY-----` described format only — no key material here # repo-checks: allow, ES256). Ed25519 is explicitly **not** supported for Coinbase App / Advanced Trade SDKs — the generic CDP portal flow defaults to Ed25519, so the connection wizard must instruct the user to select ECDSA.
+- REST JWT: ES256; header `kid` = key name plus a random hex `nonce` **in the header**; claims `sub` = key name, `iss` = `"cdp"`, `nbf` = now, `exp` = `nbf + 120` seconds (JWTs expire after 2 minutes), and a REST-only `uri` claim = `"{METHOD} {host}{path}"` (including any UUID in the path). Sent as `Authorization: Bearer <jwt>`. A **different JWT per unique REST request**; a **different JWT per WebSocket message** (no `uri` claim for WS).
+- Sample inconsistency: the C# samples use `iss: "coinbase-cloud"` while all other samples use `"cdp"`; an `aud` claim is absent from most current REST samples (only `'cdp_service'` appears in one Ruby WS sample). Treat `aud` as an adapter-verification item (see below).
+- Permission toggles: **View / Trade / Transfer / Receive**. `view` covers accounts, all REST market data (including candles), order-history reads, and order previews; `trade` covers place/edit/cancel; `transfer` exists only for funds movement and is never needed by this app (its docs warn that leaking a `transfer`-enabled secret allows draining funds). A **view-only key is sufficient for backtest/paper/data-only usage**; WebSocket market-data channels need no key at all.
+
+### REST & WebSocket surface (item 3)
+
+- REST base: `https://api.coinbase.com/api/v3/brokerage`. There is also a fully **public, unauthenticated** market-data family under `/api/v3/brokerage/market/...` (e.g. `GET /market/products/{product_id}/candles`, public products/book/trades, server time) — paper/backtest mode can operate without any API key.
+- Key private REST paths (scope): `GET /accounts` (view), `GET /products`, `GET /products/{product_id}`, `GET /products/{product_id}/candles` (view), `POST /orders` (trade), `POST /orders/edit` (trade), `POST /orders/batch_cancel` (trade), `GET /orders/historical/{order_id}` (view), `GET /orders/historical/fills` (view), `GET /orders/historical/batch` (view).
+- WebSocket: public market data `wss://advanced-trade-ws.coinbase.com` (channels `heartbeats`, `candles`, `status`, `ticker`, `ticker_batch`, `level2`, `market_trades` — **JWT not required**, marked "optional; recommended for connection reliability"); user channels on `wss://advanced-trade-ws-user.coinbase.com` (JWT required). Subscribe shape: `{"type": "subscribe", "channel": "<name>", "product_ids": [...]}` (plus `jwt` where needed).
+- **Channels close after 60–90 seconds without updates**; the `heartbeats` channel sends a message about every second with a counter usable to detect missed messages. Heartbeat subscription plus reconnect-with-resubscribe is mandatory in the market-data design (architecture.md §7 is already shaped for this).
+- Connection discipline: **the server disconnects if no `subscribe` arrives within 5 seconds** of connecting; **one channel per subscription message**; the user channel allows one connection per user (public `advanced-trade-ws` may be used as failover for the user connection).
+
+### Candles (item 4)
+
+- REST candles: `GET /api/v3/brokerage/products/{product_id}/candles` (auth `view`); required `start`/`end` UNIX (seconds) string params; `limit` defaults to **350**, max **350**. No pagination mechanism is documented — history import must page by time windows.
+- Granularity enum (as documented labels): `ONE_MINUTE`, `FIVE_MINUTE`, `FIFTEEN_MINUTE`, `THIRTY_MINUTE`, `ONE_HOUR`, **`TWO_HOUR`, `FOUR_HOUR`**, `SIX_HOUR`, `ONE_DAY`. All five roadmap timeframes (1m/5m/15m/1h/4h) are natively supported; 4h no longer requires aggregation from 1h (aggregation code stays useful for unsupported combos and as documented fallback).
+- Candle objects: `{start, low, high, open, close, volume}` — **all strings** (UNIX start seconds; decimal-string prices/volume). This matches the decimal-safe storage rule in architecture.md §14.
+- WS candles channel: `snapshot` and `update` events; documented as five-minute buckets with updates roughly every second; no explicit `is_closed`/complete flag on candle objects — completeness must be derived (e.g., new bucket `start` observed).
+
+### Product metadata (item 5)
+
+- Current constraint field names: `base_increment`, `quote_increment`, `price_increment`, `base_min_size`, `base_max_size`, `quote_min_size`, `quote_max_size`, plus `base_name`/`quote_name`, `status`, `is_disabled`, `trading_disabled`, `auction_mode`, and order-type restriction flags `cancel_only`, `limit_only`, `post_only`.
+- The older names `min_product_size`/`max_product_size` and `min_market_funds`/`max_market_funds` are **not** in the current `GET /product` schema — the adapter must not use them.
+
+### Orders, fills, cancellation (item 6)
+
+- `client_order_id` is **required** for every placed order (no format/length constraint documented — example style `0000-00000-000000`; generate deterministic UUIDs internally). **Duplicate protection is built in**: reusing a `client_order_id` does not create a second order — "the order will not be created and the order corresponding with that ID will be returned instead" (failure reason `DUPLICATE_CLIENT_ORDER_ID`). This materially de-risks the duplicate-order architecture (R-02).
+- Order configuration keys (exact enum strings): `market_market_ioc`, `market_market_fok`, `sor_limit_ioc`, `limit_limit_gtc`, `limit_limit_gtd`, `limit_limit_fok`, `twap_limit_gtd`, `stop_limit_stop_limit_gtc`, `stop_limit_stop_limit_gtd`, `trigger_bracket_gtc`, `trigger_bracket_gtd`, `scaled_limit_gtc`. Response: `NewOrderResponse{success, success_response{order_id, ...}, error_response{...}}`.
+- Order status enum: `PENDING`, `OPEN`, `FILLED`, `CANCELLED`, `EXPIRED`, `FAILED`, `UNKNOWN_ORDER_STATUS`, `QUEUED`, `CANCEL_QUEUED`, `EDIT_QUEUED`. Order object includes `total_fees`, `filled_size`, `average_filled_price`, `number_of_fills`, `created_time` (RFC3339 — note: not `created_at`), `attached_order_id`, `originating_order_id`, `reject_reason`/`reject_message`.
+- Get order: `GET /orders/historical/{order_id}` by exchange `order_id`; lookup by `client_order_id` query param exists but is **deprecated** — reconciliation should key on exchange order IDs.
+- Fills: `GET /orders/historical/fills` with `order_ids`/`product_ids`/`trade_ids` (plural), `start_sequence_timestamp`/`end_sequence_timestamp`, cursor pagination, default limit 100 (max not documented). Fill objects **do not include `client_order_id`** — fill-to-intent reconciliation must map via `order_id`. Fill fields include `entry_id`, `trade_id`, `price`, `size`, `commission`, `trade_time`, `sequence_timestamp`, `liquidity_indicator`, and `trade_type` (`FILL` plus adjustment types `REVERSAL`, `CORRECTION`, `SYNTHETIC` — daily accounting must handle adjusted fills).
+- Cancel: `POST /orders/batch_cancel` takes `order_ids` only (no `client_order_id`), returns per-order `{success, failure_reason, order_id}` with reasons including `ORDER_IS_FULLY_FILLED`, `DUPLICATE_CANCEL_REQUEST`, `UNKNOWN_CANCEL_ORDER`, `ORDER_IS_BEING_REPLACED`, `NOT_ALLOWED_TO_CANCEL` — the execution layer must treat these as distinct outcomes, not a single "cancel failed".
+
+### Rate limits (item 7)
+
+- REST: current official docs **no longer publish a numeric Advanced-Trade-specific REST rate-limit table** (the old rate-limits page 308-redirects to the product overview; the OpenAPI spec contains none). The closest documented figure is the Coinbase App default of **10,000 requests per hour per API key or OAuth user** — but that page sits in the `api-architecture` section with v2/OAuth examples, so its applicability to `/api/v3/brokerage` CDP-key endpoints is **flagged for live verification**. No per-endpoint limits for place/cancel are documented anywhere.
+- Exceeding the limit yields HTTP `429` with a `rate_limit_exceeded` error id ("Too many requests"). Rate-limit response headers are not enumerated in the docs — capture them from live responses during integration verification.
+- Official retry guidance (Coinbase for Agents skill, the only current official prose): **honor `Retry-After` when present; otherwise bounded exponential backoff with jitter; reduce concurrency instead of retrying continuously** — matches architecture.md §18's bounded-retry rule.
+- WebSocket: **connections and unauthenticated messages each limited to 8 per second per IP**; authenticated-message limits and exceeded-behavior are not documented. Reconnect loops must be bounded and jittered well below this (architecture.md §7 already requires exponential backoff with jitter).
+
+### Protective orders (item 8)
+
+- Spot protective orders: `stop_limit_stop_limit_gtc`/`gtd` with `base_size`, `limit_price`, `stop_price`, `stop_direction` (`STOP_DIRECTION_STOP_UP`/`STOP_DIRECTION_STOP_DOWN` — triggered by last-trade price movement). **There is no placeable stop-market configuration** in the Advanced Trade spot spec (`stop_market` appears zero times; the `STOP` value in the historical `order_types` filter enum is a query label, not a placement type).
+- Bracket support: `trigger_bracket_gtc`/`gtd` — a limit order with stop-limit parameters embedded (`base_size`, `limit_price`, `stop_trigger_price`); when triggered, a stop-limit is auto-placed with limit price ±5% (documented behavior). Attached take-profit/stop-loss legs go through top-level `attached_order_configuration` where "Only TriggerBracketGtc is eligible. Size field must be omitted" — the legs are expressed via `limit_price` + `stop_trigger_price`; there are no `take_profit_price`/`stop_loss_price` fields in the spec. Related failure codes exist (`INVALID_ATTACHED_TAKE_PROFIT_PRICE`, `INVALID_ATTACHED_STOP_LOSS_PRICE`, `SINGLE_LEGGED_TPSL_NOT_ALLOWED`, …). Bracket note: on a fill of one price level "the other side is automatically disabled" (OCO-like), but **no OCO configuration exists** and "execution of downside protection is not guaranteed during high market volatility".
+- **No native trailing stop** exists in the Advanced Trade spot `place_order` configuration set ("trailing" appears zero times in the spec); trailing stops exist only on the separate Global Derivatives gateway. The engine must not assume exchange-native trailing stops; architecture.md §9's caution stands.
+- `edit_order` (`POST /orders/edit`, trade scope) plus `edit_preview` exist: edits can change `size`, `price`, and `stop_price` (stop price only for TP/SL or SL orders), and may attach/drop `attached_order_configuration` — with hard restrictions such as `ONLY_LIMIT_ORDER_EDITS_SUPPORTED`, `CANNOT_EDIT_TRIGGERED_ORDER`, `CANNOT_EDIT_ATTACHED_ORDER_CONFIGURATION_AFTER_CREATION`, `CANNOT_ADD_LEG_TO_TPSL_ORDER`, `CANNOT_REMOVE_LEG_FROM_TPSL_ORDER`. Protective-order verification still requires confirming status via `trigger_status` on the order object rather than assuming acceptance.
+- Response interpretation quirk (official FAQ): a `place_order` response with `success: true` **and** `failure_reason: UNKNOWN_FAILURE_REASON` means the order was accepted — the failure reason can be ignored.
+- Per-pair availability (BTC-USD/ETH-USD) of protective types is not enumerated by the docs (product-agnostic) — flagged for integration verification.
+
+## Flagged for adapter-integration verification (docs do not fully settle these)
+
+These are recorded facts-vs-gaps to resolve with mocked (and later, carefully manual) integration tests in Sprint 4/5/10 — they are **not** assumptions to hardcode:
+
+1. REST `granularity` wire format: docs present enum labels (`ONE_MINUTE`, …); confirm whether the endpoint also accepts integer seconds on the live wire, and lock the adapter to whichever is authoritative.
+2. WS candles channel granularity flexibility: the current channel page describes fixed five-minute buckets with ~1 s updates; verify whether a granularity parameter is accepted on subscribe, or whether higher-timeframe live candles must be aggregated locally.
+3. JWT `aud` claim requirement: absent from most current samples (`'cdp_service'` appears once); verify the exact accepted value(s) on first authenticated request.
+4. `iss` value inconsistency in samples (`"cdp"` vs `"coinbase-cloud"`): verify which is accepted.
+5. Rate-limit response header names: capture from live 429/success responses (SDK hints headers exist; main docs don't enumerate them).
+6. Authenticated WS message rate limit: not documented; measure conservatively.
+7. Candle `start` alignment and inclusive/exclusive `start`/`end` bounds on the REST candles endpoint: pin down with fixture comparisons before the gap-repair logic is built.
+8. Applicability of the Coinbase-App **10,000 req/hour** default to Advanced Trade REST `/api/v3/brokerage` (no AT-specific numeric REST limit table exists in current docs); also capture rate-limit response header names from live traffic.
+9. Per-pair availability of protective order types for BTC-USD/ETH-USD (docs are product-agnostic).
+10. Runtime resolution of duplicate `client_order_id`: field docs say the existing order is returned, while a `DUPLICATE_CLIENT_ORDER_ID` failure enum also exists — verify which fires (or both) on real reuse before building the retry-recovery logic around it.
+
+**Exit rule:** no sprint that touches the live Coinbase adapter may start while any row above is unverified, unless the sprint roadmap explicitly records the deferral. ✅ All 8 rows verified 2026-11-11; the flagged items above are wire-level confirmations assigned to the adapter integration sprints.
