@@ -46,6 +46,7 @@ Commands and results (Python 3.14.3, Node 24.14.1):
 - `npm run typecheck` / `npm test` (in `apps/desktop/`) — clean; 11 passed
 - `python scripts/repo_checks.py` — OK: 115 files scanned
 - Every async scenario runs offline through scripted transports — the `websockets` library is only touched by the real transport adapter (lazy import), never by tests
+- CI from a clean checkout: run [43107118213](https://github.com/jamesdileva/trend-setter/actions/runs/43107118213) — **green** (repo hygiene, engine ruff+mypy+pytest, desktop typecheck+vitest)
 
 ## Deviations & follow-ups
 
