@@ -37,3 +37,22 @@ class StrategyEvaluateRequest(BaseModel):
 
     product_id: str | None = None
     timeframe: str | None = None
+
+
+class BacktestRunRequest(BaseModel):
+    """A labeled historical simulation request (never a live order path)."""
+
+    product_id: str = Field(description="Product to simulate, e.g. BTC-USD")
+    timeframe: str = Field(description="Candle timeframe, e.g. 1h")
+    start: str | None = Field(default=None, description="ISO start date (UTC)")
+    end: str | None = Field(default=None, description="ISO end date (UTC)")
+    fast_ema_period: int = Field(default=20, ge=2, le=400)
+    slow_ema_period: int = Field(default=50, ge=2, le=400)
+    rsi_period: int = Field(default=14, ge=2, le=200)
+    rsi_entry_ceiling: float = Field(default=70.0, gt=0, lt=100)
+    rsi_exit_floor: float | None = Field(default=None, gt=0, lt=100)
+    initial_quote: float = Field(default=1000.0, gt=0)
+    position_size_quote: float = Field(default=500.0, gt=0)
+    fee_bps: float = Field(default=100.0, ge=0, description="Placeholder per-side fee")
+    slippage_bps: float = Field(default=10.0, ge=0, description="Placeholder per-side slippage")
+    in_sample_fraction: float = Field(default=0.7, gt=0, lt=1)

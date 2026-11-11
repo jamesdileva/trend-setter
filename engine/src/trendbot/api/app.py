@@ -24,6 +24,7 @@ import secrets as pysecrets
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 
 import httpx
@@ -34,9 +35,14 @@ from starlette.middleware.base import RequestResponseEndpoint
 
 from trendbot import __version__
 from trendbot.api.schemas import (
+    BacktestRunRequest,
     CredentialRequest,
     StrategyConfigRequest,
     StrategyEvaluateRequest,
+)
+from trendbot.application.backtest_service import (
+    InsufficientDataError,
+    run_backtest_over_store,
 )
 from trendbot.application.coinbase_connection import (
     CoinbaseConnectionService,
@@ -47,9 +53,12 @@ from trendbot.application.strategy_engine import (
     StrategyEngine,
     StrategyNotConfiguredError,
 )
+from trendbot.backtesting.assumptions import FeeAssumptions
 from trendbot.database.models import EngineEvent
+from trendbot.database.repositories import BacktestRepository
 from trendbot.database.session import Database
 from trendbot.security.secret_store import SecretStore
+from trendbot.strategies.config import EmaRsiConfig
 
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1"})
 TOKEN_HEADER = "X-Local-Token"
@@ -323,5 +332,68 @@ def create_app(
                 "config_hash": decision.config_hash,
             },
         )
+
+    @app.post("/backtest/run", dependencies=[Depends(require_local_token)])
+    def run_backtest(payload: BacktestRunRequest) -> JSONResponse:
+        """Run and persist a labeled historical simulation over stored candles."""
+        try:
+            start = datetime.fromisoformat(payload.start) if payload.start else None
+            end = datetime.fromisoformat(payload.end) if payload.end else None
+            config = EmaRsiConfig(
+                product_id=payload.product_id,
+                timeframe=payload.timeframe,
+                fast_ema_period=payload.fast_ema_period,
+                slow_ema_period=payload.slow_ema_period,
+                rsi_period=payload.rsi_period,
+                rsi_entry_ceiling=payload.rsi_entry_ceiling,
+                rsi_exit_floor=payload.rsi_exit_floor,
+            )
+            result = run_backtest_over_store(
+                database,
+                product_id=payload.product_id,
+                timeframe=payload.timeframe,
+                start=start,
+                end=end,
+                config=config,
+                assumptions=FeeAssumptions(
+                    fee_bps=payload.fee_bps,
+                    slippage_bps=payload.slippage_bps,
+                ),
+                initial_quote=Decimal(str(payload.initial_quote)),
+                position_size_quote=Decimal(str(payload.position_size_quote)),
+                in_sample_fraction=payload.in_sample_fraction,
+            )
+        except InsufficientDataError as exc:
+            return JSONResponse(
+                status_code=409,
+                content={"status": "insufficient_data", "message": str(exc)},
+            )
+        except Exception as exc:  # noqa: BLE001 - plain-language validation errors
+            return JSONResponse(
+                status_code=400,
+                content={"status": "invalid_request", "message": str(exc)},
+            )
+        return JSONResponse(status_code=200, content=result)
+
+    @app.get("/backtest/runs", dependencies=[Depends(require_local_token)])
+    def list_backtest_runs() -> dict[str, object]:
+        """Recent simulation runs (labeled; summaries only)."""
+        repo = BacktestRepository(database)
+        runs = []
+        for row in repo.list_runs():
+            runs.append(
+                {
+                    "run_id": row.id,
+                    "product_id": row.product_id,
+                    "timeframe": row.granularity,
+                    "start": _iso(row.start_time),
+                    "end": _iso(row.end_time),
+                    "metrics": row.metrics,
+                }
+            )
+        return {
+            "warning": "HISTORICAL SIMULATIONS — estimates, not guarantees.",
+            "runs": runs,
+        }
 
     return app

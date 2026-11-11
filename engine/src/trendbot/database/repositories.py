@@ -9,7 +9,8 @@ unique constraints (ON CONFLICT DO NOTHING), never by "check then insert".
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, cast
+from decimal import Decimal
+from typing import Any, Protocol, cast
 
 from sqlalchemy import func, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -17,6 +18,8 @@ from sqlalchemy.engine import CursorResult
 
 from trendbot.database.models import (
     AppSetting,
+    BacktestRun,
+    BacktestTrade,
     CandleRecord,
     EngineEvent,
     FillRecord,
@@ -28,6 +31,40 @@ from trendbot.database.session import Database
 from trendbot.exchange.types import Fill
 from trendbot.market_data.candles import Candle
 from trendbot.strategies.decisions import StrategyDecision
+
+
+class TradeRecordLike(Protocol):
+    """Structural view of a backtest trade for persistence."""
+
+    @property
+    def entry_time(self) -> datetime: ...
+
+    @property
+    def exit_time(self) -> datetime: ...
+
+    @property
+    def entry_price(self) -> Decimal: ...
+
+    @property
+    def exit_price(self) -> Decimal: ...
+
+    @property
+    def base_size(self) -> Decimal: ...
+
+    @property
+    def entry_notional(self) -> Decimal: ...
+
+    @property
+    def fee_entry(self) -> Decimal: ...
+
+    @property
+    def fee_exit(self) -> Decimal: ...
+
+    @property
+    def pnl_quote(self) -> Decimal: ...
+
+    @property
+    def note(self) -> str: ...
 
 
 def fill_entry_key(fill: Fill) -> str:
@@ -301,6 +338,37 @@ class StrategyConfigRepository:
             session.flush()
             return row
 
+    def get_or_create(
+        self, name: str, config_json: dict[str, Any], config_hash: str
+    ) -> StrategyConfig:
+        """Fetch the row for this content, creating an (inactive) one if needed.
+
+        Used by backtests: recording a run must never change the user's
+        active configuration.
+        """
+        with self._db.session() as session:
+            existing = session.scalars(
+                select(StrategyConfig).where(
+                    StrategyConfig.name == name,
+                    StrategyConfig.config_hash == config_hash,
+                )
+            ).first()
+            if existing is not None:
+                return existing
+            latest_version = session.scalar(
+                select(func.max(StrategyConfig.version)).where(StrategyConfig.name == name)
+            )
+            row = StrategyConfig(
+                name=name,
+                version=int(latest_version or 0) + 1,
+                config_hash=config_hash,
+                config_json=config_json,
+                is_active=False,
+            )
+            session.add(row)
+            session.flush()
+            return row
+
 
 class SignalRepository:
     """Signal persistence, idempotent per candle (uq_signal_per_candle)."""
@@ -350,5 +418,78 @@ class SignalRepository:
                     .where(Signal.product_id == product_id, Signal.granularity == granularity)
                     .order_by(Signal.candle_start_time.desc(), Signal.id.desc())
                     .limit(limit)
+                ).all()
+            )
+
+
+class BacktestRepository:
+    """Persistence for simulation runs and their trade ledgers."""
+
+    def __init__(self, database: Database) -> None:
+        self._db = database
+
+    def record_run(
+        self,
+        *,
+        strategy_config_id: int,
+        product_id: str,
+        timeframe: str,
+        start_time: datetime,
+        end_time: datetime,
+        assumptions: dict[str, object],
+        metrics: dict[str, object],
+    ) -> int:
+        """Store one simulation run header; returns its id."""
+        from trendbot.market_data.granularity import granularity_for_timeframe
+
+        with self._db.session() as session:
+            row = BacktestRun(
+                strategy_config_id=strategy_config_id,
+                product_id=product_id,
+                granularity=granularity_for_timeframe(timeframe),
+                start_time=start_time,
+                end_time=end_time,
+                assumptions=assumptions,
+                metrics=metrics,
+            )
+            session.add(row)
+            session.flush()
+            return int(row.id)
+
+    def record_trade(self, run_id: int, trade: TradeRecordLike) -> None:
+        """Append one ledger entry for a run (side always long in this model)."""
+        with self._db.session() as session:
+            session.add(
+                BacktestTrade(
+                    backtest_run_id=run_id,
+                    side="long",
+                    entry_time=trade.entry_time,
+                    exit_time=trade.exit_time,
+                    entry_price=trade.entry_price,
+                    exit_price=trade.exit_price,
+                    size=trade.base_size,
+                    fees=trade.fee_entry + trade.fee_exit,
+                    pnl=trade.pnl_quote,
+                    reason=trade.note or "simulated",
+                )
+            )
+
+    def list_runs(self, limit: int = 20) -> list[BacktestRun]:
+        with self._db.session() as session:
+            return list(
+                session.scalars(
+                    select(BacktestRun)
+                    .order_by(BacktestRun.id.desc())
+                    .limit(limit)
+                ).all()
+            )
+
+    def trades_for(self, run_id: int) -> list[BacktestTrade]:
+        with self._db.session() as session:
+            return list(
+                session.scalars(
+                    select(BacktestTrade)
+                    .where(BacktestTrade.backtest_run_id == run_id)
+                    .order_by(BacktestTrade.entry_time)
                 ).all()
             )
