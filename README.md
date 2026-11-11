@@ -50,7 +50,8 @@ trend-setter/
 | 3 | Coinbase connection wizard and secure credentials | **Done** — OS-backed secret store, JWT validation, wizard UI (real-key test pending) |
 | 4 | Historical market data and candle correctness | **Done** — windowed imports, validation, dedup, gaps, aggregation; live-API verified |
 | 5 | Live market data, reconnect, and backfill | **Done** — WS feed, heartbeats, reconnect, backfill, stale gate |
-| 6 | Baseline strategy and configuration | Next |
+| 6 | Baseline strategy and configuration | **Done** — EMA/RSI indicators, crossover decisions, versioned config, persisted signals |
+| 7 | Backtesting engine and evaluation UI | Next |
 | 4–14 | Historical data → live data → strategy → backtest → risk → paper → live → packaging → audit | Not started |
 
 Progress details in [docs/sprints/](docs/sprints).
