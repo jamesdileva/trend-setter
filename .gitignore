@@ -24,7 +24,7 @@ dist/
 # Node / desktop (from Sprint 1 desktop work)
 node_modules/
 apps/desktop/dist/
-apps/desktop/out/
+apps/desktop/dist-electron/
 *.tsbuildinfo
 
 # Local application data — database, logs, backups
