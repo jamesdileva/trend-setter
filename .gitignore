@@ -1,0 +1,44 @@
+# Secrets and credentials — never commit
+.env
+.env.*
+*.pem
+*.key
+*.pfx
+*.p12
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+build/
+dist/
+
+# Node / desktop (from Sprint 1 desktop work)
+node_modules/
+apps/desktop/dist/
+apps/desktop/out/
+*.tsbuildinfo
+
+# Local application data — database, logs, backups
+*.db
+*.sqlite
+*.sqlite3
+*.log
+logs/
+backups/
+*.bak
+
+# OS / editor
+Thumbs.db
+Desktop.ini
+.DS_Store
+.idea/
+.vscode/
