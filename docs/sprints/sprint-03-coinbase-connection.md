@@ -1,7 +1,7 @@
 # Sprint 03 — Coinbase connection wizard and secure credentials
 
 - **Roadmap sprint:** Sprint 3 in [`../../sprint-roadmap.md`](../../sprint-roadmap.md)
-- **Status:** In progress
+- **Status:** Done
 - **Date:** 2026-11-11
 
 ## Goal
@@ -49,6 +49,7 @@ Commands and results (Python 3.14.3, Node 24.14.1):
 - `npm run build` — clean build
 - `python scripts/repo_checks.py` — OK: 93 files scanned (two PEM-format false positives resolved: docstring reworded, UI placeholder split)
 - Live boot smoke: engine migrated a fresh app-data database on startup; `/health` ok; `/coinbase/connection` → `{connected:false}` with token, **401 without token**; `/diagnostics` redacted (no key material, no event bodies)
+- CI from a clean checkout: run [43100835191](https://github.com/jamesdileva/trend-setter/actions/runs/43100835191) — **green** (repo hygiene, engine ruff+mypy+pytest, desktop typecheck+vitest)
 
 ## Deviations & follow-ups
 
