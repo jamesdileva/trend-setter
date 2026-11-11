@@ -91,6 +91,43 @@ body {
   color: var(--bad);
 }
 
+.strategy-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.strategy-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.strategy-fields input {
+  background: #12151c;
+  color: var(--text);
+  border: 1px solid #262d3d;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.strategy-fields input:focus {
+  outline: 1px solid var(--accent);
+}
+
+.decision {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid #262d3d;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 .meta {
   color: var(--muted);
   font-size: 13px;

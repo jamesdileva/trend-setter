@@ -19,6 +19,11 @@ const api = {
   testCoinbase: () => ipcRenderer.invoke("coinbase:test"),
   disconnectCoinbase: () => ipcRenderer.invoke("coinbase:disconnect"),
   getMarketDataStatus: () => ipcRenderer.invoke("market-data:get-status"),
+  getStrategyCurrent: () => ipcRenderer.invoke("strategy:get-current"),
+  saveStrategyConfig: (payload: Record<string, unknown>) =>
+    ipcRenderer.invoke("strategy:save-config", payload),
+  evaluateStrategy: (payload: Record<string, unknown>) =>
+    ipcRenderer.invoke("strategy:evaluate", payload),
   openExternal: (url: string) => ipcRenderer.invoke("shell:open-external", url),
 };
 

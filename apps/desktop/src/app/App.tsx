@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { EngineStatus, MarketDataStatus } from "../types/electron";
 import { getDesktopApi } from "../services/desktopApi";
 import { ConnectionCard } from "../components/ConnectionCard";
+import { StrategyCard } from "../components/StrategyCard";
 
 const STATE_LABELS: Record<EngineStatus["state"], string> = {
   stopped: "Engine stopped",
@@ -111,6 +112,8 @@ export function App() {
           </p>
         )}
       </section>
+
+      <StrategyCard />
 
       <ConnectionCard />
 

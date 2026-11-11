@@ -68,6 +68,13 @@ if (!gotLock) {
     ipcMain.handle("coinbase:test", () => supervisor?.engineRequest("/coinbase/test-connection", "POST"));
     ipcMain.handle("coinbase:disconnect", () => supervisor?.engineRequest("/coinbase/disconnect", "POST"));
     ipcMain.handle("market-data:get-status", () => supervisor?.engineRequest("/market-data/status"));
+    ipcMain.handle("strategy:get-current", () => supervisor?.engineRequest("/strategy/current"));
+    ipcMain.handle("strategy:save-config", (_event, payload: Record<string, unknown>) =>
+      supervisor?.engineRequest("/strategy/config", "POST", payload),
+    );
+    ipcMain.handle("strategy:evaluate", (_event, payload: Record<string, unknown>) =>
+      supervisor?.engineRequest("/strategy/evaluate", "POST", payload),
+    );
 
     ipcMain.handle("shell:open-external", (_event, url: string) => {
       if (!isAllowedExternalUrl(url)) {
