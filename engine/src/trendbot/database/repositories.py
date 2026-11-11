@@ -125,6 +125,20 @@ class CandleRepository:
                 .limit(1)
             )
 
+    def latest_complete_start(self, product_id: str, granularity: str) -> datetime | None:
+        """Newest stored **complete** candle start (freshness gate input)."""
+        with self._db.session() as session:
+            return session.scalar(
+                select(CandleRecord.start_time)
+                .where(
+                    CandleRecord.product_id == product_id,
+                    CandleRecord.granularity == granularity,
+                    CandleRecord.is_complete.is_(True),
+                )
+                .order_by(CandleRecord.start_time.desc())
+                .limit(1)
+            )
+
 
 class FillRepository:
     """Idempotent fill storage keyed on the composite fill identity."""
