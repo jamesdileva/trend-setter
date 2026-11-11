@@ -46,6 +46,7 @@ Commands and results (Python 3.14.3, Node 24.14.1):
 - `npm run typecheck` / `npm test` (in `apps/desktop/`) — clean; 11 passed; build clean
 - `python scripts/repo_checks.py` — OK: 131 files scanned
 - Scenario fixtures are exact by construction: flat series keep EMAs exactly at the constant, so the crossover lands precisely on the crafted last candle (BUY with ceiling 97 where RSI computes to ≈96.9; SELL on the mirror; HOLD variants)
+- CI from a clean checkout: run [43110515084](https://github.com/jamesdileva/trend-setter/actions/runs/43110515084) — **green** (repo hygiene, engine ruff+mypy+pytest, desktop typecheck+vitest)
 
 ## Deviations & follow-ups
 
