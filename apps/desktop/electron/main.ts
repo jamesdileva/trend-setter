@@ -75,6 +75,10 @@ if (!gotLock) {
     ipcMain.handle("strategy:evaluate", (_event, payload: Record<string, unknown>) =>
       supervisor?.engineRequest("/strategy/evaluate", "POST", payload),
     );
+    ipcMain.handle("backtest:run", (_event, payload: Record<string, unknown>) =>
+      supervisor?.engineRequest("/backtest/run", "POST", payload),
+    );
+    ipcMain.handle("backtest:runs", () => supervisor?.engineRequest("/backtest/runs"));
 
     ipcMain.handle("shell:open-external", (_event, url: string) => {
       if (!isAllowedExternalUrl(url)) {

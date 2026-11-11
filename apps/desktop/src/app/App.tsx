@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { EngineStatus, MarketDataStatus } from "../types/electron";
 import { getDesktopApi } from "../services/desktopApi";
+import { BacktestCard } from "../components/BacktestCard";
 import { ConnectionCard } from "../components/ConnectionCard";
 import { StrategyCard } from "../components/StrategyCard";
 
@@ -114,6 +115,8 @@ export function App() {
       </section>
 
       <StrategyCard />
+
+      <BacktestCard />
 
       <ConnectionCard />
 

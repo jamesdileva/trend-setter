@@ -24,6 +24,9 @@ const api = {
     ipcRenderer.invoke("strategy:save-config", payload),
   evaluateStrategy: (payload: Record<string, unknown>) =>
     ipcRenderer.invoke("strategy:evaluate", payload),
+  runBacktest: (payload: Record<string, unknown>) =>
+    ipcRenderer.invoke("backtest:run", payload),
+  listBacktestRuns: () => ipcRenderer.invoke("backtest:runs"),
   openExternal: (url: string) => ipcRenderer.invoke("shell:open-external", url),
 };
 

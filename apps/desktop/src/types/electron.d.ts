@@ -79,6 +79,8 @@ export interface DesktopApi {
   getStrategyCurrent(): Promise<EngineResponse | null>;
   saveStrategyConfig(payload: Record<string, unknown>): Promise<EngineResponse | null>;
   evaluateStrategy(payload: Record<string, unknown>): Promise<EngineResponse | null>;
+  runBacktest(payload: Record<string, unknown>): Promise<EngineResponse | null>;
+  listBacktestRuns(): Promise<EngineResponse | null>;
   openExternal(url: string): Promise<void>;
 }
 
