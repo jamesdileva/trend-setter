@@ -44,6 +44,8 @@ Commands and results (Python 3.14.3):
 
 **Live public-API verification** (read-only, no credentials, nothing trading-related): `python -m trendbot.tools.import_history --product BTC-USD --timeframe 1h --days 3` against the real Coinbase public endpoint imported **73 candles, 0 rejected, 0 missing intervals**; a second run reported **0 new / 73 duplicates** (live dedup proof). Data sanity: BTC closes ≈ $72.8k–$75.4k over a contiguous 2026-11-08 → 2026-11-11 UTC range, decimal-string precision preserved, source `exchange`. This confirmed the flagged wire-format items 1 and 7 in the checklist (granularity label param, response shape, UNIX-seconds bounds, ordering).
 
+CI from a clean checkout: run [43104165899](https://github.com/jamesdileva/trend-setter/actions/runs/43104165899) — **green** (repo hygiene, engine ruff+mypy+pytest, desktop typecheck+vitest).
+
 ## Deviations & follow-ups
 
 - The candles response carries no per-candle product/granularity — the requested context is stamped during parsing (documented in `_parse_candle_page`).
