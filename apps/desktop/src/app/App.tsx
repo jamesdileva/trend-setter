@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { EngineStatus } from "../types/electron";
+import type { EngineStatus, MarketDataStatus } from "../types/electron";
 import { getDesktopApi } from "../services/desktopApi";
 import { ConnectionCard } from "../components/ConnectionCard";
 
@@ -11,8 +11,26 @@ const STATE_LABELS: Record<EngineStatus["state"], string> = {
   crashed: "Engine error",
 };
 
+function feedLabel(status: MarketDataStatus | null): string {
+  if (!status || !status.running) {
+    return "Live feed not running";
+  }
+  const state = status.state ?? "unknown";
+  const labels: Record<string, string> = {
+    connected: "Live feed connected",
+    connecting: "Live feed connecting…",
+    reconnecting: "Live feed reconnecting…",
+    stopped: "Live feed stopped",
+    not_wired: "Live feed not wired in this build",
+  };
+  const lastComplete = Object.entries(status.last_complete ?? {});
+  const newest = lastComplete.length > 0 ? ` · last candle ${lastComplete[0][1].slice(11, 16)} UTC` : "";
+  return `${labels[state] ?? `Live feed: ${state}`}${newest}`;
+}
+
 export function App() {
   const [status, setStatus] = useState<EngineStatus | null>(null);
+  const [marketStatus, setMarketStatus] = useState<MarketDataStatus | null>(null);
   const api = getDesktopApi();
 
   useEffect(() => {
@@ -24,9 +42,19 @@ export function App() {
         .getEngineStatus()
         .then((next) => setStatus(next))
         .catch(() => setStatus(null));
+      void api
+        .getMarketDataStatus()
+        .then((response) => {
+          if (response && typeof response.body === "object" && response.body !== null) {
+            setMarketStatus(response.body as MarketDataStatus);
+          } else {
+            setMarketStatus(null);
+          }
+        })
+        .catch(() => setMarketStatus(null));
     };
     refresh();
-    const timer = setInterval(refresh, 2000);
+    const timer = setInterval(refresh, 5000);
     return () => clearInterval(timer);
   }, [api]);
 
@@ -70,6 +98,18 @@ export function App() {
             Stop engine
           </button>
         </div>
+      </section>
+
+      <section className="card" aria-live="polite">
+        <h2>Market data</h2>
+        <p className={`meta ${marketStatus?.state && marketStatus.state !== "connected" ? "warn" : ""}`}>
+          {feedLabel(marketStatus)}
+        </p>
+        {marketStatus?.last_error && (
+          <p className="error" role="alert">
+            {marketStatus.last_error}
+          </p>
+        )}
       </section>
 
       <ConnectionCard />

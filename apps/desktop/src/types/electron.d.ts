@@ -22,6 +22,16 @@ export interface CoinbaseStatus {
   last_validated_at: string | null;
 }
 
+export interface MarketDataStatus {
+  running: boolean;
+  state?: string;
+  last_message_at?: string | null;
+  last_heartbeat_at?: string | null;
+  last_complete?: Record<string, string>;
+  last_error?: string | null;
+  reconnects?: number;
+}
+
 export interface DesktopApi {
   getEngineStatus(): Promise<EngineStatus | null>;
   startEngine(): Promise<EngineStatus | null>;
@@ -30,6 +40,7 @@ export interface DesktopApi {
   connectCoinbase(keyName: string, privateKeyPem: string): Promise<EngineResponse | null>;
   testCoinbase(): Promise<EngineResponse | null>;
   disconnectCoinbase(): Promise<EngineResponse | null>;
+  getMarketDataStatus(): Promise<EngineResponse | null>;
   openExternal(url: string): Promise<void>;
 }
 

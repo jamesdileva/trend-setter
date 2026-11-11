@@ -97,6 +97,10 @@ body {
   margin: 0;
 }
 
+.meta.warn {
+  color: var(--warn);
+}
+
 .error {
   color: var(--bad);
   font-size: 13px;

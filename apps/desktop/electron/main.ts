@@ -67,6 +67,7 @@ if (!gotLock) {
     );
     ipcMain.handle("coinbase:test", () => supervisor?.engineRequest("/coinbase/test-connection", "POST"));
     ipcMain.handle("coinbase:disconnect", () => supervisor?.engineRequest("/coinbase/disconnect", "POST"));
+    ipcMain.handle("market-data:get-status", () => supervisor?.engineRequest("/market-data/status"));
 
     ipcMain.handle("shell:open-external", (_event, url: string) => {
       if (!isAllowedExternalUrl(url)) {

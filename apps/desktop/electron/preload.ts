@@ -18,6 +18,7 @@ const api = {
     ipcRenderer.invoke("coinbase:connect", { keyName, privateKeyPem }),
   testCoinbase: () => ipcRenderer.invoke("coinbase:test"),
   disconnectCoinbase: () => ipcRenderer.invoke("coinbase:disconnect"),
+  getMarketDataStatus: () => ipcRenderer.invoke("market-data:get-status"),
   openExternal: (url: string) => ipcRenderer.invoke("shell:open-external", url),
 };
 
