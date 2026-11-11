@@ -43,6 +43,7 @@ Commands and results (Python 3.14.3, Node 24.14.1):
 - `npm run typecheck` / `npm test` (in `apps/desktop/`) — clean; 11 passed; build clean
 - `python scripts/repo_checks.py` — OK: 141 files scanned
 - Engine correctness check surfaced and fixed a real flaw: entries did not account for the fee against available cash (an unaffordable all-in entry could push simulated cash negative) — entries now require notional + fee in cash
+- CI from a clean checkout: run [43114266660](https://github.com/jamesdileva/trend-setter/actions/runs/43114266660) — **green** (repo hygiene, engine ruff+mypy+pytest, desktop typecheck+vitest)
 
 ## Deviations & follow-ups
 
