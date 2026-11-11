@@ -39,7 +39,7 @@ Out of scope: real Coinbase adapter (Sprint 4+), database layer (Sprint 2), stra
 - [x] Engine can start and stop through supervisor
 - [x] UI can read health status from local API
 - [x] API is not reachable from another machine on the LAN (loopback binding + middleware)
-- [ ] Tests pass from a clean checkout (CI)
+- [x] Tests pass from a clean checkout (CI — run [43088885856](https://github.com/jamesdileva/trend-setter/actions/runs/43088885856), green: repo hygiene, engine ruff+mypy+pytest, desktop typecheck+vitest)
 - [x] No API key or secret is needed
 
 ## Verification
