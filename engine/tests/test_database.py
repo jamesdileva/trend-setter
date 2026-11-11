@@ -263,3 +263,15 @@ class TestSettings:
         assert repository.get("ui.theme") == "dark"
         repository.set("ui.theme", "light")
         assert repository.get("ui.theme") == "light"
+
+
+class TestFreshness:
+    def test_latest_start_returns_the_newest_candle(self, migrated_db):
+        repository = CandleRepository(migrated_db)
+        assert repository.latest_start("BTC-USD", "ONE_HOUR") is None
+        repository.upsert_many([sample_candle()])
+        later = sample_candle(start_time=datetime(2026, 1, 1, 14, tzinfo=UTC))
+        repository.upsert_many([later])
+        expected = datetime(2026, 1, 1, 14, tzinfo=UTC)
+        assert repository.latest_start("BTC-USD", "ONE_HOUR") == expected
+        assert repository.latest_start("ETH-USD", "ONE_HOUR") is None
