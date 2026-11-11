@@ -4,10 +4,11 @@
 
 | Component | Version | Where pinned | Verified against | Notes |
 |---|---|---|---|---|
-| Python (engine) | 3.14 | `.github/workflows/ci.yml`; dev machine runs 3.14.3 | — | architecture requires 3.11+; re-verify all engine dependencies on this version before Sprint 2 |
-| Node (desktop) | 24 | dev machine runs 24.14.1 | — | pin the exact version when desktop work starts (Sprint 1) |
-| Engine dependencies | none yet | `engine/pyproject.toml` | — | keep runtime deps minimal; dev tooling in the `[dev]` extra |
-| Desktop dependencies | none yet | `apps/desktop/package.json` + committed lockfile | — | lockfile must be committed |
+| Python (engine) | 3.14 | `.github/workflows/ci.yml`; dev machine runs 3.14.3 | Sprint 1 suite (71 tests) passes on 3.14 | architecture requires 3.11+ |
+| Node (desktop) | 24 | `.github/workflows/ci.yml`; dev machine runs 24.14.1 | Sprint 1 typecheck + vitest pass on 24 | |
+| Engine runtime deps | fastapi 0.162.4, uvicorn 0.54.0 (pydantic 2.14.3) | `engine/pyproject.toml` ranges | Sprint 1 API tests | widen only with the full suite passing |
+| Engine dev deps | pytest 9.2.0, ruff 0.17.4, mypy 2.4.1, httpx 0.28.1 | `engine/pyproject.toml` `[dev]` | — | type checks enforced in CI |
+| Desktop deps | electron 37.10.3, vite 6.4.6, react 19.3.1, typescript 5.9.3, vitest 3.2.7 | `apps/desktop/package.json` + committed `package-lock.json` | Sprint 1 build/typecheck/vitest | lockfile is the source of truth |
 | Windows target | 10/11 x64 | architecture.md §17 | — | installer testing on clean VMs is a later sprint |
 
 ## Rules

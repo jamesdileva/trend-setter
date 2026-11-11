@@ -44,9 +44,10 @@ trend-setter/
 
 | Roadmap sprint | Focus | Status |
 |---|---|---|
-| 0 | Architecture lock, Coinbase verification, risk register | In progress — artifacts seeded, verification pending |
-| 1 | Repo, dev environment, application skeleton | In progress — repo bootstrap + engine test skeleton done |
-| 2–14 | Database → data → strategy → backtest → risk → paper → live → packaging → audit | Not started |
+| 0 | Architecture lock, Coinbase verification, risk register | **Done** — all 8 items verified against official docs |
+| 1 | Repo, dev environment, application skeleton | **Done** — desktop shell, engine loopback API, supervisor, fake adapter |
+| 2 | Database foundation, migrations, durable events | Next |
+| 3–14 | Connection wizard → data → strategy → backtest → risk → paper → live → packaging → audit | Not started |
 
 Progress details in [docs/sprints/](docs/sprints).
 
