@@ -77,13 +77,13 @@
 
 These are recorded facts-vs-gaps to resolve with mocked (and later, carefully manual) integration tests in Sprint 4/5/10 — they are **not** assumptions to hardcode:
 
-1. REST `granularity` wire format: docs present enum labels (`ONE_MINUTE`, …); confirm whether the endpoint also accepts integer seconds on the live wire, and lock the adapter to whichever is authoritative.
+1. REST `granularity` wire format: **resolved 2026-11-11** — the label form (`ONE_MINUTE`, `FOUR_HOUR`, …) is accepted as the `granularity` query param against the live public candles endpoint; response shape `{candles: [{start, open, high, low, close, volume}]}` (all decimal strings, `start` = UNIX seconds) confirmed. Residual nuance: `end` bounds appear to include the in-progress bucket; the importer windows `[start, end)` and dedups, so partial buckets are stored but flagged via `requested_buckets` ceil accounting.
 2. WS candles channel granularity flexibility: the current channel page describes fixed five-minute buckets with ~1 s updates; verify whether a granularity parameter is accepted on subscribe, or whether higher-timeframe live candles must be aggregated locally.
 3. JWT `aud` claim requirement: absent from most current samples (`'cdp_service'` appears once); verify the exact accepted value(s) on first authenticated request.
 4. `iss` value inconsistency in samples (`"cdp"` vs `"coinbase-cloud"`): verify which is accepted.
-5. Rate-limit response header names: capture from live 429/success responses (SDK hints headers exist; main docs don't enumerate them).
+5. Rate-limit response header names: capture from live 429/success responses (SDK hints headers exist; main docs don't enumerate them). `Retry-After` is honored by the backoff layer regardless.
 6. Authenticated WS message rate limit: not documented; measure conservatively.
-7. Candle `start` alignment and inclusive/exclusive `start`/`end` bounds on the REST candles endpoint: pin down with fixture comparisons before the gap-repair logic is built.
+7. Candle `start` alignment and inclusive/exclusive `start`/`end` bounds on the REST candles endpoint: **partially resolved 2026-11-11** — live verification confirmed UTC-aligned bucket starts and the documented 350-limit; exact exclusive/inclusive edge semantics pinned by fixture tests with the observed behavior (see item 1's residual nuance).
 8. Applicability of the Coinbase-App **10,000 req/hour** default to Advanced Trade REST `/api/v3/brokerage` (no AT-specific numeric REST limit table exists in current docs); also capture rate-limit response header names from live traffic.
 9. Per-pair availability of protective order types for BTC-USD/ETH-USD (docs are product-agnostic).
 10. Runtime resolution of duplicate `client_order_id`: field docs say the existing order is returned, while a `DUPLICATE_CLIENT_ORDER_ID` failure enum also exists — verify which fires (or both) on real reuse before building the retry-recovery logic around it.

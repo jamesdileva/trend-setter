@@ -48,7 +48,8 @@ trend-setter/
 | 1 | Repo, dev environment, application skeleton | **Done** — desktop shell, engine loopback API, supervisor, fake adapter |
 | 2 | Database foundation, migrations, durable events | **Done** — 16 core tables, Alembic, repositories, backup/restore |
 | 3 | Coinbase connection wizard and secure credentials | **Done** — OS-backed secret store, JWT validation, wizard UI (real-key test pending) |
-| 4 | Historical market data and candle correctness | Next |
+| 4 | Historical market data and candle correctness | **Done** — windowed imports, validation, dedup, gaps, aggregation; live-API verified |
+| 5 | Live market data, reconnect, and backfill | Next |
 | 4–14 | Historical data → live data → strategy → backtest → risk → paper → live → packaging → audit | Not started |
 
 Progress details in [docs/sprints/](docs/sprints).
