@@ -43,6 +43,7 @@ Commands and results (Python 3.14.3):
 - `python -m mypy` — no issues in 71 source files
 - `python scripts/repo_checks.py` — OK: 168 files scanned
 - `GET /live/status`, `POST /live/arm-request`, `POST /live/arm-confirm {token}`, `POST /live/disarm` endpoints wired; `main.py` forces live-disarm on every startup
+- CI from a clean checkout: run [43289821806](https://github.com/jamesdileva/trend-setter/actions/runs/43289821806) — **green** (repo hygiene, engine ruff+mypy+pytest, desktop typecheck+vitest)
 
 ## Deviations & follow-ups
 
