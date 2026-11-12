@@ -29,6 +29,22 @@ from trendbot.exchange.types import (
 from trendbot.market_data.candles import Candle
 
 
+class UnknownOutcomeError(RuntimeError):
+    """The order may have been accepted but the response was lost.
+
+    Callers must treat the outcome as unknown, mark the intent
+    ``unknown_submission``, and reconcile against exchange state — never
+    blindly retry (architecture.md §10).
+    """
+
+    def __init__(self, client_order_id: str) -> None:
+        super().__init__(
+            f"The outcome of order {client_order_id} is unknown: the request may have "
+            "been accepted but the response was lost. Reconcile before retrying."
+        )
+        self.client_order_id = client_order_id
+
+
 class ExchangeAdapter(ABC):
     """Interface every exchange adapter implements."""
 

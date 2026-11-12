@@ -5,20 +5,31 @@ verified Coinbase semantics where it matters, most notably: a duplicate
 ``client_order_id`` returns the existing order instead of creating a new
 one (``docs/coinbase-verification-checklist.md``, item 6).
 
+Testing extensions:
+
+- ``simulate_unknown_outcome``: the next submission for that id is
+  accepted internally but raises :class:`UnknownOutcomeError` — exactly
+  the "request accepted, response lost" scenario the submission flow and
+  reconciler must survive.
+- ``simulate_partial_fill`` / ``simulate_full_fill``: drive fill events
+  (including cancel/fill races) through ``list_fills``.
+
 Fixture values below are test fixtures, not verified market data.
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from trendbot.exchange.base import ExchangeAdapter
+from trendbot.exchange.base import ExchangeAdapter, UnknownOutcomeError
 from trendbot.exchange.types import (
     AccountBalance,
     Fill,
     OrderRequest,
     OrderResult,
+    OrderSide,
     OrderSnapshot,
     ProductInfo,
 )
@@ -74,7 +85,13 @@ class FakeExchangeAdapter(ExchangeAdapter):
         self._orders_by_client_id: dict[str, OrderSnapshot] = {}
         self._orders_by_exchange_id: dict[str, OrderSnapshot] = {}
         self._canceled: set[str] = set()
+        self._fills: list[Fill] = []
+        self._unknown_outcome_ids: set[str] = set()
+        self._order_sizes: dict[str, Decimal] = {}
         self._counter = 0
+        self.create_calls = 0
+
+    # -- market data -------------------------------------------------
 
     def test_connection(self) -> bool:
         return True
@@ -122,7 +139,10 @@ class FakeExchangeAdapter(ExchangeAdapter):
             current += step
         return candles
 
+    # -- orders ------------------------------------------------------
+
     def create_order(self, request: OrderRequest) -> OrderResult:
+        self.create_calls += 1
         if request.product_id not in PRODUCTS:
             return OrderResult(
                 client_order_id=request.client_order_id,
@@ -153,6 +173,13 @@ class FakeExchangeAdapter(ExchangeAdapter):
         )
         self._orders_by_client_id[request.client_order_id] = snapshot
         self._orders_by_exchange_id[snapshot.exchange_order_id] = snapshot
+        self._order_sizes[request.client_order_id] = request.base_size or Decimal(0)
+        if request.client_order_id in self._unknown_outcome_ids:
+            # First attempt: accepted internally, response "lost". A retry
+            # with the same id finds the existing order (one-shot loss) —
+            # exactly the duplicate-protection behavior of the real API.
+            self._unknown_outcome_ids.discard(request.client_order_id)
+            raise UnknownOutcomeError(request.client_order_id)
         return OrderResult(
             client_order_id=request.client_order_id,
             exchange_order_id=snapshot.exchange_order_id,
@@ -172,10 +199,60 @@ class FakeExchangeAdapter(ExchangeAdapter):
         ]
 
     def list_fills(self, product_id: str | None = None) -> list[Fill]:
-        return []
+        if product_id is None:
+            return list(self._fills)
+        return [fill for fill in self._fills if fill.product_id == product_id]
 
     def cancel_order(self, exchange_order_id: str) -> bool:
         if exchange_order_id not in self._orders_by_exchange_id:
             return False
         self._canceled.add(exchange_order_id)
         return True
+
+    # -- test simulation hooks ---------------------------------------
+
+    def simulate_unknown_outcome(self, client_order_id: str) -> None:
+        """The next create_order for this id is accepted but its response is lost."""
+        self._unknown_outcome_ids.add(client_order_id)
+
+    def simulate_fill(
+        self,
+        client_order_id: str,
+        price: Decimal,
+        size: Decimal | None = None,
+        *,
+        when: datetime | None = None,
+    ) -> Fill | None:
+        """Record a fill for an existing simulated order (partial or full).
+
+        With ``size`` given the order becomes PARTIALLY_FILLED (unless the
+        cumulative size reaches the ordered size); without it the order
+        fills completely.
+        """
+        snapshot = self._orders_by_client_id.get(client_order_id)
+        if snapshot is None:
+            return None
+        ordered = self._order_sizes.get(client_order_id, snapshot.filled_size + Decimal(1))
+        fill_size = size if size is not None else ordered - snapshot.filled_size
+        fill = Fill(
+            exchange_order_id=snapshot.exchange_order_id,
+            trade_id=f"trade-{len(self._fills) + 1}",
+            product_id=snapshot.product_id,
+            side=OrderSide(snapshot.side),
+            price=price,
+            size=fill_size,
+            commission=price * fill_size * Decimal("0.01"),
+            trade_time=when or datetime.now(UTC),
+        )
+        self._fills.append(fill)
+        new_filled = snapshot.filled_size + fill_size
+        status = "FILLED" if new_filled >= ordered else "PARTIALLY_FILLED"
+        updated = replace(
+            snapshot,
+            status=status,
+            filled_size=new_filled,
+            total_fees=snapshot.total_fees + fill.commission,
+        )
+        self._orders_by_client_id[client_order_id] = updated
+        self._orders_by_exchange_id[snapshot.exchange_order_id] = updated
+        return fill

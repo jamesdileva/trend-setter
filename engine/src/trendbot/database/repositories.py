@@ -22,7 +22,11 @@ from trendbot.database.models import (
     BacktestTrade,
     CandleRecord,
     EngineEvent,
+    ExchangeOrder,
     FillRecord,
+    OrderIntent,
+    Position,
+    RiskEvent,
     Signal,
     StrategyConfig,
     utc_now,
@@ -492,4 +496,205 @@ class BacktestRepository:
                     .where(BacktestTrade.backtest_run_id == run_id)
                     .order_by(BacktestTrade.entry_time)
                 ).all()
+            )
+
+
+class OrderIntentRepository:
+    """Durable order intents: persisted before any network submission."""
+
+    def __init__(self, database: Database) -> None:
+        self._db = database
+
+    def create(
+        self,
+        *,
+        client_order_id: str,
+        product_id: str,
+        side: str,
+        order_kind: str = "limit",
+        base_size: Decimal | None = None,
+        quote_size: Decimal | None = None,
+        limit_price: Decimal | None = None,
+    ) -> OrderIntent | None:
+        """Persist one intent; returns None when the id already exists."""
+        with self._db.session() as session:
+            existing = session.scalar(
+                select(OrderIntent).where(OrderIntent.client_order_id == client_order_id)
+            )
+            if existing is not None:
+                return None
+            row = OrderIntent(
+                client_order_id=client_order_id,
+                product_id=product_id,
+                side=side,
+                order_kind=order_kind,
+                base_size=base_size,
+                quote_size=quote_size,
+                limit_price=limit_price,
+                state="created",
+            )
+            session.add(row)
+            session.flush()
+            return row
+
+    def get(self, client_order_id: str) -> OrderIntent | None:
+        with self._db.session() as session:
+            return session.scalars(
+                select(OrderIntent).where(OrderIntent.client_order_id == client_order_id)
+            ).first()
+
+    def mark(
+        self, client_order_id: str, new_state: str, *, risk_reason: str | None = None
+    ) -> OrderIntent:
+        """Validate and persist one state transition (state machine enforced)."""
+        from trendbot.execution.state_machine import validate_transition
+
+        with self._db.session() as session:
+            row = session.scalars(
+                select(OrderIntent).where(OrderIntent.client_order_id == client_order_id)
+            ).first()
+            if row is None:
+                raise KeyError(f"Unknown order intent {client_order_id!r}.")
+            validate_transition(row.state, new_state)
+            row.state = new_state
+            if risk_reason is not None:
+                row.risk_decision = "rejected"
+                row.risk_reason = risk_reason
+            session.flush()
+            return row
+
+    def list_unresolved(self) -> list[OrderIntent]:
+        from trendbot.execution.state_machine import is_unresolved
+
+        with self._db.session() as session:
+            rows = list(session.scalars(select(OrderIntent)).all())
+        return [row for row in rows if is_unresolved(row.state)]
+
+
+class ExchangeOrderRepository:
+    """Maps local intents to exchange order ids and statuses."""
+
+    def __init__(self, database: Database) -> None:
+        self._db = database
+
+    def record(
+        self,
+        *,
+        client_order_id: str,
+        exchange_order_id: str,
+        product_id: str,
+        side: str,
+        status: str,
+    ) -> None:
+        with self._db.session() as session:
+            existing = session.scalar(
+                select(ExchangeOrder).where(
+                    ExchangeOrder.exchange_order_id == exchange_order_id
+                )
+            )
+            if existing is not None:
+                existing.status = status
+                existing.synced_at = utc_now()
+                return
+            intent = session.scalars(
+                select(OrderIntent).where(OrderIntent.client_order_id == client_order_id)
+            ).first()
+            session.add(
+                ExchangeOrder(
+                    exchange_order_id=exchange_order_id,
+                    client_order_id=client_order_id,
+                    order_intent_id=intent.id if intent else None,
+                    product_id=product_id,
+                    side=side,
+                    status=status,
+                )
+            )
+
+    def exchange_id_for(self, client_order_id: str) -> str | None:
+        with self._db.session() as session:
+            return session.scalar(
+                select(ExchangeOrder.exchange_order_id).where(
+                    ExchangeOrder.client_order_id == client_order_id
+                )
+            )
+
+
+class PositionRepository:
+    """Position snapshots derived from confirmed fills (exchange truth wins)."""
+
+    def __init__(self, database: Database) -> None:
+        self._db = database
+
+    def apply_fill(self, fill: Fill) -> Position:
+        """Apply one confirmed fill to the position snapshot.
+
+        BUY fills accumulate; SELL fills reduce (never below zero). The
+        average entry price updates only on accumulations.
+        """
+        with self._db.session() as session:
+            row = session.scalars(
+                select(Position).where(Position.product_id == fill.product_id)
+            ).first()
+            if row is None:
+                row = Position(product_id=fill.product_id, side="flat", size=Decimal(0))
+                session.add(row)
+            if fill.side.value == "buy":
+                previous = row.size or Decimal(0)
+                total = previous + fill.size
+                row.average_entry_price = (
+                    ((row.average_entry_price or Decimal(0)) * previous + fill.price * fill.size)
+                    / total
+                    if total > 0
+                    else None
+                )
+                row.size = total
+                row.side = "long" if total > 0 else "flat"
+            else:
+                remaining = max((row.size or Decimal(0)) - fill.size, Decimal(0))
+                row.size = remaining
+                row.side = "long" if remaining > 0 else "flat"
+            row.updated_at = utc_now()
+            session.flush()
+            return row
+
+    def get(self, product_id: str) -> Position | None:
+        with self._db.session() as session:
+            return session.scalars(
+                select(Position).where(Position.product_id == product_id)
+            ).first()
+
+    def open_positions(self) -> list[Position]:
+        with self._db.session() as session:
+            rows = list(session.scalars(select(Position)).all())
+        return [row for row in rows if (row.size or Decimal(0)) > 0]
+
+
+class RiskRepository:
+    """Persisted risk decisions, rejections, and kill-switch events."""
+
+    def __init__(self, database: Database) -> None:
+        self._db = database
+
+    def record(
+        self,
+        *,
+        event_kind: str,
+        product_id: str | None = None,
+        detail: dict[str, object] | None = None,
+    ) -> int:
+        with self._db.session() as session:
+            row = RiskEvent(event_kind=event_kind, product_id=product_id, detail=detail)
+            session.add(row)
+            session.flush()
+            return int(row.id)
+
+    def count_for(self, event_kind: str) -> int:
+        with self._db.session() as session:
+            return int(
+                session.scalar(
+                    select(func.count()).select_from(RiskEvent).where(
+                        RiskEvent.event_kind == event_kind
+                    )
+                )
+                or 0
             )
