@@ -79,6 +79,10 @@ if (!gotLock) {
       supervisor?.engineRequest("/backtest/run", "POST", payload),
     );
     ipcMain.handle("backtest:runs", () => supervisor?.engineRequest("/backtest/runs"));
+    ipcMain.handle("paper:control", (_event, payload: { path: string; body: Record<string, unknown> }) =>
+      supervisor?.engineRequest(payload.path, "POST", payload.body),
+    );
+    ipcMain.handle("paper:status", () => supervisor?.engineRequest("/paper/status"));
 
     ipcMain.handle("shell:open-external", (_event, url: string) => {
       if (!isAllowedExternalUrl(url)) {

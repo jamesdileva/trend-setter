@@ -27,6 +27,9 @@ const api = {
   runBacktest: (payload: Record<string, unknown>) =>
     ipcRenderer.invoke("backtest:run", payload),
   listBacktestRuns: () => ipcRenderer.invoke("backtest:runs"),
+  paperControl: (path: string, body: Record<string, unknown>) =>
+    ipcRenderer.invoke("paper:control", { path, body }),
+  getPaperStatus: () => ipcRenderer.invoke("paper:status"),
   openExternal: (url: string) => ipcRenderer.invoke("shell:open-external", url),
 };
 
