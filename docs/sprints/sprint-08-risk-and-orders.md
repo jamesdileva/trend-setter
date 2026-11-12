@@ -46,6 +46,7 @@ Commands and results (Python 3.14.3):
 - `python -m mypy` — no issues in 66 source files
 - `python scripts/repo_checks.py` — OK: 156 files scanned
 - All scenarios run against the mock exchange — the fake gained one-shot unknown-outcome loss (accepted internally, response lost, retry finds the existing order) mirroring the verified duplicate-protection semantics
+- CI from a clean checkout: run [43284324587](https://github.com/jamesdileva/trend-setter/actions/runs/43284324587) — **green** (repo hygiene, engine ruff+mypy+pytest, desktop typecheck+vitest)
 
 ## Deviations & follow-ups
 
