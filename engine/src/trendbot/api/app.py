@@ -37,6 +37,7 @@ from trendbot import __version__
 from trendbot.api.schemas import (
     BacktestRunRequest,
     CredentialRequest,
+    PaperResetRequest,
     StrategyConfigRequest,
     StrategyEvaluateRequest,
 )
@@ -53,14 +54,20 @@ from trendbot.application.strategy_engine import (
     StrategyEngine,
     StrategyNotConfiguredError,
 )
+from trendbot.application.trading_controls import TradingController, TradingMode
 from trendbot.backtesting.assumptions import FeeAssumptions
 from trendbot.database.models import EngineEvent
-from trendbot.database.repositories import BacktestRepository
+from trendbot.database.repositories import BacktestRepository, PositionRepository
 from trendbot.database.session import Database
+from trendbot.paper.account import PaperAccount, ResetNotConfirmedError
 from trendbot.security.secret_store import SecretStore
 from trendbot.strategies.config import EmaRsiConfig
 
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1"})
+PAPER_WARNING_TEXT = (
+    "PAPER TRADING — simulated funds only. No real orders are placed and "
+    "no real balances are shown."
+)
 TOKEN_HEADER = "X-Local-Token"
 DIAGNOSTICS_EVENT_LIMIT = 20
 
@@ -93,6 +100,8 @@ def create_app(
     supplies its status snapshot for the local API and the UI.
     """
     runtime = EngineRuntime()
+    paper_account = PaperAccount(database)
+    trading_controller = TradingController(database)
     connection_service = CoinbaseConnectionService(
         database=database,
         secret_store=secret_store,
@@ -256,6 +265,80 @@ def create_app(
                     "created_at": _iso(event.created_at),
                 }
                 for event in events
+            ],
+        }
+
+    @app.post("/paper/start", dependencies=[Depends(require_local_token)])
+    def paper_start() -> dict[str, object]:
+        """Start (or resume) the paper session. Simulated funds only."""
+        paper_account.ensure_session()
+        trading_controller.set_mode(TradingMode.NORMAL, reason="paper start")
+        return {"status": "running", "warning": PAPER_WARNING_TEXT}
+
+    @app.post("/paper/pause", dependencies=[Depends(require_local_token)])
+    def paper_pause() -> dict[str, object]:
+        """Pause new entries; existing management continues."""
+        trading_controller.set_mode(TradingMode.ENTRIES_PAUSED, reason="paper pause")
+        return {"status": "entries_paused", "warning": PAPER_WARNING_TEXT}
+
+    @app.post("/paper/stop", dependencies=[Depends(require_local_token)])
+    def paper_stop() -> dict[str, object]:
+        """Stop trading: entries paused and open orders canceled by the controller."""
+        trading_controller.set_mode(TradingMode.STOPPED, reason="paper stop")
+        return {"status": "stopped", "warning": PAPER_WARNING_TEXT}
+
+    @app.post("/paper/emergency-stop", dependencies=[Depends(require_local_token)])
+    def paper_emergency_stop() -> dict[str, object]:
+        """Kill switch: blocks everything until explicitly re-armed."""
+        trading_controller.set_mode(TradingMode.EMERGENCY_STOPPED, reason="paper emergency stop")
+        return {"status": "emergency_stopped", "warning": PAPER_WARNING_TEXT}
+
+    @app.post("/paper/reset", dependencies=[Depends(require_local_token)])
+    def paper_reset(payload: PaperResetRequest) -> JSONResponse:
+        """Wipe simulated balances/history. Requires confirm=true."""
+        try:
+            paper_account.reset(confirm=payload.confirm)
+        except ResetNotConfirmedError as exc:
+            return JSONResponse(
+                status_code=400,
+                content={"status": "reset_not_confirmed", "message": str(exc)},
+            )
+        return JSONResponse(
+            status_code=200,
+            content={"status": "reset", "warning": PAPER_WARNING_TEXT},
+        )
+
+    @app.get("/paper/status", dependencies=[Depends(require_local_token)])
+    def paper_status() -> dict[str, object]:
+        """Paper account, position, and mode — always labeled as simulated."""
+        mode = trading_controller.current_mode()
+        position = PositionRepository(database).get("BTC-USD")
+        cash = paper_account.cash()
+        size = (position.size if position else Decimal(0)) or Decimal(0)
+        return {
+            "warning": PAPER_WARNING_TEXT,
+            "account_kind": "paper",
+            "mode": mode.value,
+            "entries_allowed": trading_controller.entries_allowed(),
+            "cash": str(cash),
+            "starting_balance": str(paper_account.starting_balance()),
+            "session_started_at": paper_account.session_started_at(),
+            "position": {
+                "product_id": "BTC-USD",
+                "size": str(size or Decimal(0)),
+                "side": (position.side if position and size else "flat"),
+                "average_entry_price": (
+                    str(position.average_entry_price)
+                    if position and position.average_entry_price
+                    else None
+                ),
+            },
+            "recent_snapshots": [
+                {
+                    "available": str(row.available),
+                    "captured_at": _iso(row.captured_at),
+                }
+                for row in paper_account.snapshots(limit=10)
             ],
         }
 

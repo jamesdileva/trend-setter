@@ -56,3 +56,9 @@ class BacktestRunRequest(BaseModel):
     fee_bps: float = Field(default=100.0, ge=0, description="Placeholder per-side fee")
     slippage_bps: float = Field(default=10.0, ge=0, description="Placeholder per-side slippage")
     in_sample_fraction: float = Field(default=0.7, gt=0, lt=1)
+
+
+class PaperResetRequest(BaseModel):
+    """Resetting the paper account wipes simulated history — confirm required."""
+
+    confirm: bool = Field(default=False, description="Must be true to actually reset.")
