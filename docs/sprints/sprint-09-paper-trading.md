@@ -47,3 +47,4 @@ Commands and results (Python 3.14.3, Node 24.14.1):
 - Equity snapshots mark to close at the candle's bucket end — intrabar equity is not modeled (consistent with the backtester).
 - Single-product paper session this sprint; multi-product sessions need per-product engine instances (documented follow-up).
 - The real Coinbase fee tier must replace the placeholder assumptions before comparing paper results to live expectations (same note as Sprint 7).
+- **UI polish (Sprint 11):** the strategy card must explain EMA/RSI in plain language for nontechnical users — e.g. "Fast EMA tracks the recent price trend over N candles; Slow EMA tracks the longer trend; a BUY signal fires when the fast line crosses above the slow line and RSI confirms momentum isn't overheated." Each parameter needs a tooltip with the same tone (roadmap Sprint 11 task 9).
