@@ -24,6 +24,9 @@ import jwt
 JWT_LIFETIME_SECONDS = 120
 ISSUER = "cdp"
 
+PEM_HEADER = "-----BEGIN EC PRIVATE KEY-----"
+PEM_FOOTER = "-----END EC PRIVATE KEY-----"
+
 
 class JwtBuildError(ValueError):
     """The key material is unusable for ES256 signing."""
@@ -34,14 +37,33 @@ def _issued_at(now: datetime | None) -> int:
     return int(timestamp)
 
 
+def normalize_pem(raw: str) -> str:
+    """Fix common copy-paste issues with PEM keys.
+
+    CDP key files store the key as a JSON string where newlines are
+    literal backslash-n sequences. Windows editors may add CRLF. Users
+    often paste surrounding quotes or extra whitespace. This function
+    normalizes all of those so PyJWT can parse the key.
+    """
+    text = raw.strip().strip('"').strip("'")
+    # JSON-escaped newlines: literal backslash followed by n → actual newline
+    text = text.replace("\\n", "\n")
+    # CRLF → LF
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    # Strip whitespace around each line, drop empties
+    lines = [line.strip() for line in text.split("\n") if line.strip()]
+    return "\n".join(lines)
+
+
 def _encode(claims: dict[str, object], key_name: str, private_key_pem: str) -> str:
     headers = {"kid": key_name, "nonce": pysecrets.token_hex(16)}
     try:
         return jwt.encode(claims, private_key_pem, algorithm="ES256", headers=headers)
     except Exception as exc:
         raise JwtBuildError(
-            "The private key could not be used for ES256 signing. Coinbase requires an "
-            "ECDSA (ES256) key — the portal defaults to Ed25519, which does not work here."
+            "The private key could not be used for ES256 signing. Coinbase requires "
+            "an ECDSA (ES256) key — the portal defaults to Ed25519, which does not "
+            "work here."
         ) from exc
 
 
@@ -63,7 +85,7 @@ def build_rest_jwt(
         "exp": issued + JWT_LIFETIME_SECONDS,
         "uri": f"{method} {host}{path}",
     }
-    return _encode(claims, key_name, private_key_pem)
+    return _encode(claims, key_name, normalize_pem(private_key_pem))
 
 
 def build_websocket_jwt(key_name: str, private_key_pem: str, *, now: datetime | None = None) -> str:
@@ -75,4 +97,4 @@ def build_websocket_jwt(key_name: str, private_key_pem: str, *, now: datetime | 
         "nbf": issued,
         "exp": issued + JWT_LIFETIME_SECONDS,
     }
-    return _encode(claims, key_name, private_key_pem)
+    return _encode(claims, key_name, normalize_pem(private_key_pem))

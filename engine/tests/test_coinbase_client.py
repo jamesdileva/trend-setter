@@ -210,3 +210,63 @@ class TestTradePermissionProbe:
     def test_network_failure_makes_the_probe_inconclusive(self):
         client = make_client(transport=stub_transport(fail=True))
         assert client.detect_trade_permission() is None
+
+
+class TestNormalizePem:
+    """Tests for PEM normalization: CDP key files store keys with literal
+    backslash-n sequences; Windows editors add CRLF; users add quotes/spaces."""
+
+    def test_json_escaped_newlines_are_fixed(self):
+        from trendbot.exchange.coinbase_auth import normalize_pem
+
+        # The CDP key file stores the key as a JSON string with literal
+        # backslash-n sequences (not actual newlines). The raw string here
+        # uses double-backslash to simulate that: each \\n in the source
+        # is a literal backslash followed by n.
+        raw = "-----BEGIN EC PRIVATE KEY-----\\nMHcCAQEE\\n-----END EC PRIVATE KEY-----\\n"
+        normalized = normalize_pem(raw)
+        lines = normalized.split("\n")
+        assert lines[0] == "-----BEGIN EC PRIVATE KEY-----"
+        assert "MHcCAQEE" in lines[1]
+        assert lines[-1] == "-----END EC PRIVATE KEY-----"
+        assert "\\n" not in normalized  # no literal backslash-n remains
+
+    def test_crlf_is_normalized(self):
+        from trendbot.exchange.coinbase_auth import normalize_pem
+
+        raw = "-----BEGIN EC PRIVATE KEY-----\r\nMHcCAQEE\r\n-----END EC PRIVATE KEY-----\r\n"
+        normalized = normalize_pem(raw)
+        assert "\r" not in normalized
+        assert normalized.count("\n") == 2
+
+    def test_surrounding_whitespace_and_quotes_are_stripped(self):
+        from trendbot.exchange.coinbase_auth import normalize_pem
+
+        raw = '  "-----BEGIN EC PRIVATE KEY-----\nKEY\n-----END EC PRIVATE KEY-----"  '
+        normalized = normalize_pem(raw)
+        assert normalized.startswith("-----BEGIN")
+        assert normalized.endswith("-----END EC PRIVATE KEY-----")
+
+    def test_real_key_signs_after_normalization(self):
+        """The normalization pipeline produces a key PyJWT can use."""
+        import jwt as pyjwt
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
+
+        from trendbot.exchange.coinbase_auth import normalize_pem
+
+        key = ec.generate_private_key(ec.SECP256R1())
+        real_pem = key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.TraditionalOpenSSL,
+            encryption_algorithm=serialization.NoEncryption(),
+        ).decode()
+        # Simulate a JSON copy: escape real newlines into literal backslash-n.
+        broken = real_pem.replace("\n", "\\n")
+        normalized = normalize_pem(broken)
+        header = pyjwt.get_unverified_header(
+            pyjwt.encode(
+            {"sub": "x", "iss": "cdp", "nbf": 0, "exp": 120}, normalized, algorithm="ES256"
+        )
+        )
+        assert header["alg"] == "ES256"
