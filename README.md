@@ -53,7 +53,8 @@ trend-setter/
 | 6 | Baseline strategy and configuration | **Done** — EMA/RSI indicators, crossover decisions, versioned config, persisted signals |
 | 7 | Backtesting engine and evaluation UI | **Done** — fee-aware simulations, OOS split, labeled metrics |
 | 8 | Risk manager and order lifecycle (mock exchange) | **Done** — risk gate, durable intents, timeout recovery, reconciliation |
-| 9 | Paper trading | Next |
+| 9 | Paper trading | **Done** — simulated funds, real pipeline, controls, restart-safe |
+| 10 | Live Coinbase execution integration | Next |
 | 4–14 | Historical data → live data → strategy → backtest → risk → paper → live → packaging → audit | Not started |
 
 Progress details in [docs/sprints/](docs/sprints).
