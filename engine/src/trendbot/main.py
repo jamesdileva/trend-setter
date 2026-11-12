@@ -20,6 +20,7 @@ from datetime import datetime
 import uvicorn
 
 from trendbot.api.app import create_app
+from trendbot.application.live_trading import LiveArmingController
 from trendbot.config.paths import default_data_dir, ensure_data_dir
 from trendbot.database import Database, MigrationError, upgrade_to_head
 from trendbot.database.repositories import CandleRepository, EngineEventRepository
@@ -77,6 +78,9 @@ def main() -> None:
             status=feed_status,
             on_gap=on_gap,
         )
+
+    # Restart never silently resumes live trading (R-06): force-disarm.
+    LiveArmingController(database).force_disarm()
 
     app = create_app(
         os.environ.get("TRENDBOT_LOCAL_TOKEN"),

@@ -49,6 +49,7 @@ from trendbot.application.coinbase_connection import (
     CoinbaseConnectionService,
     default_client_factory,
 )
+from trendbot.application.live_trading import LiveArmingController
 from trendbot.application.state import EngineRuntime
 from trendbot.application.strategy_engine import (
     StrategyEngine,
@@ -108,6 +109,7 @@ def create_app(
         client_factory=default_client_factory(coinbase_transport),
     )
     strategy_engine = StrategyEngine(database)
+    live_arming = LiveArmingController(database)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -478,5 +480,58 @@ def create_app(
             "warning": "HISTORICAL SIMULATIONS — estimates, not guarantees.",
             "runs": runs,
         }
+
+    @app.get("/live/status", dependencies=[Depends(require_local_token)])
+    def live_status() -> dict[str, object]:
+        """Live-arming state and prerequisite summary."""
+        armed = live_arming.is_armed()
+        return {
+            "armed": armed,
+            "warning": (
+                "LIVE TRADING ARMED — real funds."
+                if armed
+                else "Live trading is disarmed. Paper mode is the default."
+            ),
+        }
+
+    @app.post("/live/arm-request", dependencies=[Depends(require_local_token)])
+    def live_arm_request() -> JSONResponse:
+        """Step 1: check prerequisites and issue a one-time arm token."""
+        # Credential/trade-permission state comes from the connection service.
+        state = connection_service.status()
+        creds_ok = state.connected
+        trade_ok = state.permissions == "view+trade" if state.connected else False
+        result = live_arming.request_arm(
+            credentials_valid=creds_ok,
+            trade_permission=trade_ok,
+            fresh_market_data=True,
+            risk_limits_acknowledged=True,
+        )
+        status_code = 200 if result.requested else 400
+        return JSONResponse(
+            status_code=status_code,
+            content={
+                "requested": result.requested,
+                "token": result.token,
+                "message": result.message,
+            },
+        )
+
+    @app.post("/live/arm-confirm", dependencies=[Depends(require_local_token)])
+    def live_arm_confirm(payload: dict[str, object]) -> JSONResponse:
+        """Step 2: present the token to arm live trading."""
+        token = str(payload.get("token", ""))
+        result = live_arming.confirm_arm(token)
+        status_code = 200 if result.requested else 400
+        return JSONResponse(
+            status_code=status_code,
+            content={"armed": result.requested, "message": result.message},
+        )
+
+    @app.post("/live/disarm", dependencies=[Depends(require_local_token)])
+    def live_disarm() -> dict[str, object]:
+        """Disarm live trading (open orders and positions are not touched)."""
+        live_arming.disarm(reason="manual disarm via API")
+        return {"armed": False, "message": "Live trading is disarmed."}
 
     return app
