@@ -30,6 +30,8 @@ const api = {
   paperControl: (path: string, body: Record<string, unknown>) =>
     ipcRenderer.invoke("paper:control", { path, body }),
   getPaperStatus: () => ipcRenderer.invoke("paper:status"),
+  getCandles: (timeframe: string) =>
+    ipcRenderer.invoke("candles:get", { timeframe }),
   openExternal: (url: string) => ipcRenderer.invoke("shell:open-external", url),
 };
 

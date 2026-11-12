@@ -24,6 +24,7 @@ import secrets as pysecrets
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from datetime import timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -58,11 +59,16 @@ from trendbot.application.strategy_engine import (
 from trendbot.application.trading_controls import TradingController, TradingMode
 from trendbot.backtesting.assumptions import FeeAssumptions
 from trendbot.database.models import EngineEvent
+from trendbot.database.repositories import CandleRepository
 from trendbot.database.repositories import BacktestRepository, PositionRepository
 from trendbot.database.session import Database
+from trendbot.market_data.candles import Candle
 from trendbot.paper.account import PaperAccount, ResetNotConfirmedError
 from trendbot.security.secret_store import SecretStore
+from trendbot.market_data.granularity import granularity_for_timeframe, granularity_seconds
 from trendbot.strategies.config import EmaRsiConfig
+from trendbot.strategies.indicators.ema import ema
+from trendbot.strategies.indicators.rsi import rsi
 
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1"})
 PAPER_WARNING_TEXT = (
@@ -533,5 +539,60 @@ def create_app(
         """Disarm live trading (open orders and positions are not touched)."""
         live_arming.disarm(reason="manual disarm via API")
         return {"armed": False, "message": "Live trading is disarmed."}
+
+    @app.get("/candles", dependencies=[Depends(require_local_token)])
+    def candles(
+        product_id: str = "BTC-USD",
+        timeframe: str = "5m",
+        limit: int = 200,
+    ) -> dict[str, object]:
+        """Stored candles with EMA overlays for the chart."""
+        granularity = granularity_for_timeframe(timeframe)
+
+        seconds = granularity_seconds(granularity)
+        latest = CandleRepository(database).latest_complete_start(product_id, granularity)
+        if latest is None:
+            return {"candles": [], "fast_ema": [], "slow_ema": [], "rsi": []}
+
+        required = max(51, limit)
+        window_start = latest - timedelta(seconds=(required - 1) * seconds)
+        stored = CandleRepository(database).get_range(
+            product_id, granularity, window_start, latest + timedelta(seconds=1)
+        )
+        closes = [candle.close for candle in stored]
+        fast_series = ema(closes, 20)
+        slow_series = ema(closes, 50)
+        rsi_series = rsi(closes, 14)
+
+        candles_out = []
+        fast_out = []
+        slow_out = []
+        rsi_out = []
+        for index, candle in enumerate(stored):
+            time_iso = candle.start_time.strftime("%Y-%m-%dT%H:%M:%SZ")
+            candles_out.append({
+                "time": time_iso,
+                "open": str(candle.open),
+                "high": str(candle.high),
+                "low": str(candle.low),
+                "close": str(candle.close),
+            })
+            if fast_series[index] is not None:
+                fast_out.append({"time": time_iso, "value": f"{fast_series[index]:.2f}"})
+            if slow_series[index] is not None:
+                slow_out.append({"time": time_iso, "value": f"{slow_series[index]:.2f}"})
+            if rsi_series[index] is not None:
+                rsi_out.append({"time": time_iso, "value": f"{rsi_series[index]:.2f}"})
+
+        latest_price = str(stored[-1].close) if stored else None
+        latest_time = _iso(stored[-1].start_time) if stored else None
+        return {
+            "candles": candles_out,
+            "fast_ema": fast_out,
+            "slow_ema": slow_out,
+            "rsi": rsi_out,
+            "latest_price": latest_price,
+            "latest_time": latest_time,
+        }
 
     return app

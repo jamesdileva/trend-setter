@@ -216,3 +216,28 @@ body {
   font-size: 12px;
   margin-top: auto;
 }
+
+
+.strategy-help {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.strategy-help summary {
+  cursor: pointer;
+  color: var(--accent);
+}
+
+.strategy-help p {
+  margin: 8px 0;
+}
+
+.chart-container {
+  margin-top: 12px;
+}
+
+.chart-price {
+  font-size: 15px;
+  color: var(--text);
+}

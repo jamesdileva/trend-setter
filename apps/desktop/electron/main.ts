@@ -83,6 +83,9 @@ if (!gotLock) {
       supervisor?.engineRequest(payload.path, "POST", payload.body),
     );
     ipcMain.handle("paper:status", () => supervisor?.engineRequest("/paper/status"));
+    ipcMain.handle("candles:get", (_event, payload: { timeframe: string }) =>
+      supervisor?.engineRequest(`/candles?product_id=BTC-USD&timeframe=${payload.timeframe}`),
+    );
 
     ipcMain.handle("shell:open-external", (_event, url: string) => {
       if (!isAllowedExternalUrl(url)) {

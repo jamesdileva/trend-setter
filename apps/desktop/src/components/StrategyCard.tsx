@@ -114,9 +114,33 @@ export function StrategyCard() {
     <section className="card" aria-live="polite">
       <h2>Strategy (paper evaluation only — no orders)</h2>
       <p className="meta">
-        The baseline strategy watches for a fast/slow EMA crossover and filters entries with RSI.
-        These are starting values, not recommendations. Paper evaluation never places orders.
+        The strategy watches for a moment when the short-term price trend crosses the long-term
+        trend, and checks that the market isn't overheated before suggesting a buy.
       </p>
+      <details className="strategy-help">
+        <summary>What do these terms mean?</summary>
+        <p>
+          <b>Fast EMA</b> tracks the recent price trend over a small number of candles (default
+          20). Think of it as a "quick reaction" line.
+        </p>
+        <p>
+          <b>Slow EMA</b> tracks the longer-term trend over more candles (default 50). It reacts
+          more slowly but is steadier.
+        </p>
+        <p>
+          When the fast line <b>crosses above</b> the slow line, that suggests upward momentum —
+          a possible buy. When it crosses below, that suggests downward momentum — a possible sell.
+        </p>
+        <p>
+          <b>RSI</b> (Relative Strength Index) is a 0–100 score of whether the market is
+          overheated. The entry ceiling (default 70) means "don't buy unless RSI is below this
+          number" — a check that the market isn't in a buying frenzy.
+        </p>
+        <p>
+          These are starting values, not recommendations. You can adjust them and see how the
+          strategy responds.
+        </p>
+      </details>
 
       <div className="strategy-fields">
         <label>

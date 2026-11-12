@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import type { EngineStatus, MarketDataStatus } from "../types/electron";
 import { getDesktopApi } from "../services/desktopApi";
 import { BacktestCard } from "../components/BacktestCard";
+import { CandleChart } from "../components/CandleChart";
 import { ConnectionCard } from "../components/ConnectionCard";
+import { PaperCard } from "../components/PaperCard";
 import { StrategyCard } from "../components/StrategyCard";
 
 const STATE_LABELS: Record<EngineStatus["state"], string> = {
@@ -112,7 +114,10 @@ export function App() {
             {marketStatus.last_error}
           </p>
         )}
+        <CandleChart timeframe="5m" />
       </section>
+
+      <PaperCard />
 
       <StrategyCard />
 

@@ -83,6 +83,7 @@ export interface DesktopApi {
   listBacktestRuns(): Promise<EngineResponse | null>;
   paperControl(path: string, body: Record<string, unknown>): Promise<EngineResponse | null>;
   getPaperStatus(): Promise<EngineResponse | null>;
+  getCandles(timeframe: string): Promise<EngineResponse | null>;
   openExternal(url: string): Promise<void>;
 }
 
