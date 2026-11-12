@@ -23,8 +23,7 @@ import asyncio
 import secrets as pysecrets
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -59,13 +58,11 @@ from trendbot.application.strategy_engine import (
 from trendbot.application.trading_controls import TradingController, TradingMode
 from trendbot.backtesting.assumptions import FeeAssumptions
 from trendbot.database.models import EngineEvent
-from trendbot.database.repositories import CandleRepository
-from trendbot.database.repositories import BacktestRepository, PositionRepository
+from trendbot.database.repositories import BacktestRepository, CandleRepository, PositionRepository
 from trendbot.database.session import Database
-from trendbot.market_data.candles import Candle
+from trendbot.market_data.granularity import granularity_for_timeframe, granularity_seconds
 from trendbot.paper.account import PaperAccount, ResetNotConfirmedError
 from trendbot.security.secret_store import SecretStore
-from trendbot.market_data.granularity import granularity_for_timeframe, granularity_seconds
 from trendbot.strategies.config import EmaRsiConfig
 from trendbot.strategies.indicators.ema import ema
 from trendbot.strategies.indicators.rsi import rsi
