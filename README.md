@@ -52,7 +52,8 @@ trend-setter/
 | 5 | Live market data, reconnect, and backfill | **Done** — WS feed, heartbeats, reconnect, backfill, stale gate |
 | 6 | Baseline strategy and configuration | **Done** — EMA/RSI indicators, crossover decisions, versioned config, persisted signals |
 | 7 | Backtesting engine and evaluation UI | **Done** — fee-aware simulations, OOS split, labeled metrics |
-| 8 | Risk manager and order lifecycle (mock exchange) | Next |
+| 8 | Risk manager and order lifecycle (mock exchange) | **Done** — risk gate, durable intents, timeout recovery, reconciliation |
+| 9 | Paper trading | Next |
 | 4–14 | Historical data → live data → strategy → backtest → risk → paper → live → packaging → audit | Not started |
 
 Progress details in [docs/sprints/](docs/sprints).
