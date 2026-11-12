@@ -38,6 +38,7 @@ Commands and results (Python 3.14.3, Node 24.14.1):
 - `python -m mypy` — no issues in 69 source files
 - `npm run typecheck` / `npm test` (in `apps/desktop/`) — clean; 11 passed; build clean
 - `python scripts/repo_checks.py` — OK: 163 files scanned
+- CI from a clean checkout: run [43289616451](https://github.com/jamesdileva/trend-setter/actions/runs/43289616451) — **green** (repo hygiene, engine ruff+mypy+pytest, desktop typecheck+vitest)
 
 ## Deviations & follow-ups
 
