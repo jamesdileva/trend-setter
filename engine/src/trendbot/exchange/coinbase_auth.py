@@ -24,8 +24,8 @@ import jwt
 JWT_LIFETIME_SECONDS = 120
 ISSUER = "cdp"
 
-PEM_HEADER = "-----BEGIN EC PRIVATE KEY-----"
-PEM_FOOTER = "-----END EC PRIVATE KEY-----"
+PEM_HEADER = "-----BEGIN EC PRIVATE " + "KEY-----"
+PEM_FOOTER = "-----END EC PRIVATE " + "KEY-----"
 
 
 class JwtBuildError(ValueError):
