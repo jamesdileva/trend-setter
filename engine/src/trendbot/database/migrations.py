@@ -11,7 +11,6 @@ unchanged.
 from __future__ import annotations
 
 import sys
-
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -20,6 +19,7 @@ from alembic.config import Config
 
 from trendbot.database.backup import backup_database
 from trendbot.database.session import Database
+
 
 def _find_engine_root() -> Path:
     """Find the engine root for Alembic config, handling both source tree
