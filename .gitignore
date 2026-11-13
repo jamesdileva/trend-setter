@@ -50,3 +50,5 @@ apps/desktop/release/
 apps/desktop/dist-packaged/
 apps/desktop/dist-installer/
 apps/desktop/installer-output/
+
+apps/desktop/release-final/
