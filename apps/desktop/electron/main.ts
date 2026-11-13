@@ -8,6 +8,7 @@
  * background-running policy is a later, deliberate decision).
  */
 
+import fs from "node:fs";
 import { app, BrowserWindow, ipcMain, shell } from "electron";
 import path from "node:path";
 import { EngineSupervisor } from "./process-manager";
@@ -48,12 +49,17 @@ if (!gotLock) {
   };
 
   app.whenReady().then(() => {
-    const packagedEnginePath = app.isPackaged
-      ? path.join(process.resourcesPath, "engine", "trendbot-engine.exe")
-      : undefined;
+    // Use the bundled engine exe when it exists (packaged mode);
+    // fall back to the venv Python for development.
+    const packagedEnginePath = path.join(
+      process.resourcesPath,
+      "engine",
+      "trendbot-engine.exe",
+    );
+    const usePackagedEngine = fs.existsSync(packagedEnginePath);
     supervisor = new EngineSupervisor({
       repoRoot: path.resolve(app.getAppPath(), "..", ".."),
-      packagedEnginePath,
+      packagedEnginePath: usePackagedEngine ? packagedEnginePath : undefined,
     });
 
     ipcMain.handle("engine:get-status", () => supervisor?.getStatus() ?? null);
