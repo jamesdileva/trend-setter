@@ -137,7 +137,11 @@ export class EngineSupervisor {
     child.on("error", (err: Error) => {
       this.child = null;
       this.stopPolling();
-      this.status = { state: "crashed", health: null, lastError: `engine failed to start: ${err.message}` };
+      this.status = {
+        state: "crashed",
+        health: null,
+        lastError: `engine failed to start: ${err.message} [command: ${this.spawnConfig.command}]`,
+      };
     });
     child.on("exit", (code: number | null) => {
       this.stopPolling();
@@ -150,7 +154,7 @@ export class EngineSupervisor {
         this.status = {
           state: "crashed",
           health: null,
-          lastError: `engine exited unexpectedly (code ${code ?? "unknown"})`,
+          lastError: `engine exited unexpectedly (code ${code ?? "unknown"}) [command: ${this.spawnConfig.command}]`,
         };
       }
     });
