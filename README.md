@@ -57,8 +57,8 @@ trend-setter/
 | 10 | Live Coinbase execution integration | **Done** — live adapter, arming gates, restart disarm; real-key smoke test pending |
 | 11 | Main dashboard and nontechnical-user experience | **Done** — candlestick chart, plain-language strategy help, paper card |
 | 12 | Windows packaging, installer, and lifecycle | **Done** — PyInstaller engine + NSIS installer built; VM testing deferred |
-| 13 | Operational readiness and paper soak test | Next |
-| 14 | Polish + adversarial audit | Not started |
+| 13 | Operational readiness and paper soak test | **Done (easy wins)** — log rotation, backup on shutdown, chart retry; 72h soak deferred to operator |
+| 14 | Polish + adversarial audit | **Done** — audit findings documented, strategy research written, 379 tests green |
 
 Progress details in [docs/sprints/](docs/sprints).
 
