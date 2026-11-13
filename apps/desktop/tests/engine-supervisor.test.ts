@@ -18,7 +18,23 @@ describe("resolveEngineSpawnConfig", () => {
     expect(config.args).toEqual(["-m", "trendbot.main", "--port", "9001"]);
   });
 
-  it("spawns the POSIX venv python elsewhere", () => {
+  it("spawns the bundled engine exe directly in packaged mode", () => {
+    const config = resolveEngineSpawnConfig({
+      repoRoot: path.join("C:", "repo"),
+      platform: "win32",
+      port: 9002,
+      token: "tok",
+      packagedEnginePath: path.join("C:", "app", "resources", "engine", "trendbot-engine.exe"),
+    });
+    // Packaged builds must run the bundled PyInstaller engine, never a venv
+    // Python (regression: packaged app spawned .venv python and crashed with ENOENT).
+    expect(config.command).toBe(path.join("C:", "app", "resources", "engine", "trendbot-engine.exe"));
+    expect(config.args).toEqual(["--port", "9002"]);
+    expect(config.env.TRENDBOT_LOCAL_TOKEN).toBe("tok");
+    expect(JSON.stringify(config.args)).not.toContain("trendbot.main");
+  });
+
+  it("still falls back to the venv python when no packaged engine exists", () => {
     const config = resolveEngineSpawnConfig({
       repoRoot: "/repo",
       platform: "linux",

@@ -11,6 +11,8 @@
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
 import { randomBytes } from "node:crypto";
 import path from "node:path";
 
@@ -50,7 +52,18 @@ export function resolveEngineSpawnConfig(options: {
   platform?: NodeJS.Platform;
   port?: number;
   token: string;
+  packagedEnginePath?: string;
 }): EngineSpawnConfig {
+  // Packaged builds run the bundled PyInstaller engine directly; the venv
+  // Python only exists in a development checkout (Sprint 12 packaging).
+  if (options.packagedEnginePath) {
+    return {
+      command: options.packagedEnginePath,
+      args: ["--port", String(options.port ?? DEFAULT_PORT)],
+      // The session token must never travel on the command line (implementation.md §12).
+      env: { ...process.env, TRENDBOT_LOCAL_TOKEN: options.token },
+    };
+  }
   const platform = options.platform ?? process.platform;
   const pythonRelative =
     platform === "win32"
@@ -87,6 +100,25 @@ export class EngineSupervisor {
     this.port = options.port ?? DEFAULT_PORT;
     this.baseUrl = `http://127.0.0.1:${this.port}`;
     this.spawnConfig = resolveEngineSpawnConfig({ ...options, port: this.port, token: this.token });
+    // Diagnostic: log the spawn config for debugging packaged builds
+    try {
+      const diagPath = path.join(os.tmpdir(), "trend-setter-spawn-config.json");
+      fs.writeFileSync(
+        diagPath,
+        JSON.stringify(
+          {
+            timestamp: new Date().toISOString(),
+            packagedEnginePath: options.packagedEnginePath ?? "not provided",
+            command: this.spawnConfig.command,
+            args: this.spawnConfig.args,
+          },
+          null,
+          2,
+        ),
+      );
+    } catch {
+      // diagnostic write is best effort
+    }
   }
 
   getStatus(): EngineStatus {
