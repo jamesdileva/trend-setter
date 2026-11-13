@@ -50,7 +50,7 @@ from trendbot.application.coinbase_connection import (
     default_client_factory,
 )
 from trendbot.application.live_trading import LiveArmingController
-from trendbot.application.state import EngineRuntime
+from trendbot.application.state import EngineRuntime, EngineState
 from trendbot.application.strategy_engine import (
     StrategyEngine,
     StrategyNotConfiguredError,
@@ -92,6 +92,7 @@ def create_app(
     coinbase_transport: httpx.BaseTransport | None = None,
     feed_factory: Callable[[], Any] | None = None,
     market_status_provider: Callable[[], dict[str, object]] | None = None,
+    on_shutdown: Callable[[], object] | None = None,
 ) -> FastAPI:
     """Build the engine app with explicit wiring.
 
@@ -116,6 +117,11 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        runtime.state = EngineState.RUNNING_PAPER
+        with database.session() as session:
+            session.add(EngineEvent(
+                event_type="engine_started", component="engine", message="Engine started.",
+            ))
         feed_task: asyncio.Task[None] | None = None
         if feed_factory is not None:
             feed = feed_factory()
@@ -123,12 +129,23 @@ def create_app(
         try:
             yield
         finally:
+            runtime.state = EngineState.STOPPING
             if feed_task is not None:
                 feed_task.cancel()
                 try:
                     await feed_task
                 except asyncio.CancelledError:
                     pass
+            if on_shutdown is not None:
+                try:
+                    on_shutdown()
+                except Exception:  # noqa: BLE001 - backup failure must not block shutdown
+                    pass
+            with database.session() as session:
+                session.add(EngineEvent(
+                    event_type="engine_stopped", component="engine", message="Engine stopped.",
+                ))
+            runtime.state = EngineState.READY_PAPER
 
     app = FastAPI(
         title="trendbot engine",

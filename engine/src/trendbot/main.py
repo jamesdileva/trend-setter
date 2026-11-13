@@ -14,15 +14,17 @@ public channels — no credentials needed for market data.
 from __future__ import annotations
 
 import argparse
+import logging
+import logging.handlers
 import os
-from datetime import datetime
+from datetime import UTC, datetime
 
 import uvicorn
 
 from trendbot.api.app import create_app
 from trendbot.application.live_trading import LiveArmingController
 from trendbot.config.paths import default_data_dir, ensure_data_dir
-from trendbot.database import Database, MigrationError, upgrade_to_head
+from trendbot.database import Database, MigrationError, backup_database, upgrade_to_head
 from trendbot.database.repositories import CandleRepository, EngineEventRepository
 from trendbot.market_data.backfill import GapBackfiller
 from trendbot.market_data.live_feed import PUBLIC_WS_URL, CandleFeed, FeedStatus
@@ -48,6 +50,16 @@ def main() -> None:
     args = parser.parse_args()
 
     data_dir = ensure_data_dir(default_data_dir())
+    log_dir = ensure_data_dir(data_dir / "logs")
+
+    # Rotating file handler: daily rotation, 7-day retention
+    handler = logging.handlers.TimedRotatingFileHandler(
+        log_dir / "engine.log", when="midnight", backupCount=7, encoding="utf-8"
+    )
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)-5.5s [%(name)s] %(message)s"))
+    logging.root.addHandler(handler)
+    logging.root.setLevel(logging.INFO)
+
     database = Database(data_dir / "engine.db")
     try:
         upgrade_to_head(database, backup_dir=data_dir / "backups")
@@ -88,6 +100,11 @@ def main() -> None:
         secret_store=default_secret_store(),
         feed_factory=feed_factory,
         market_status_provider=feed_status.snapshot,
+        on_shutdown=lambda: backup_database(
+            database,
+            data_dir / "backups"
+            / f"shutdown-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}.db",
+        ),
     )
     uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="info")
 

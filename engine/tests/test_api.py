@@ -96,7 +96,7 @@ class TestStatusEndpoint:
         assert response.status_code == 200
         body = response.json()
         assert body["mode"] == "paper"
-        assert body["state"] == EngineState.READY_PAPER.value
+        assert body["state"] == EngineState.RUNNING_PAPER.value
         assert body["engine_version"] == __version__
         assert body["started_at"].startswith(f"{started:%Y-%m-%dT%H}")
 

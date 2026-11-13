@@ -41,7 +41,7 @@ export function CandleChart({ timeframe = "5m" }: { timeframe?: string }) {
     if (!api || !containerRef.current) {
       return;
     }
-
+    let cancelled = false;
     const chart = createChart(containerRef.current, {
       width: containerRef.current.clientWidth,
       height: 300,
@@ -74,40 +74,46 @@ export function CandleChart({ timeframe = "5m" }: { timeframe?: string }) {
       lastValueVisible: false,
     });
 
-    void api
-      .getCandles(timeframe)
-      .then((response) => {
-        if (!response || response.status !== 200) {
-          setError("No candle data available yet.");
-          return;
-        }
-        const body = response.body as CandleResponse;
-        if (!body.candles || body.candles.length === 0) {
-          setError("No candle data available yet. The live feed needs time to collect candles.");
-          return;
-        }
-        setError(null);
-        setLatestPrice(body.latest_price);
-        setLatestTime(body.latest_time);
-
-        candleSeries.setData(
-          body.candles.map((c) => ({
-            time: c.time,
-            open: Number(c.open),
-            high: Number(c.high),
-            low: Number(c.low),
-            close: Number(c.close),
-          })),
-        );
-        fastSeries.setData(
-          body.fast_ema.map((p) => ({ time: p.time, value: Number(p.value) })),
-        );
-        slowSeries.setData(
-          body.slow_ema.map((p) => ({ time: p.time, value: Number(p.value) })),
-        );
-        chart.timeScale().fitContent();
-      })
-      .catch(() => setError("Failed to load candle data."));
+    const fetchData = (): void => {
+      void api
+        .getCandles(timeframe)
+        .then((response) => {
+          if (cancelled) return;
+          if (!response || response.status !== 200) {
+            setError("No candle data available yet.");
+            return;
+          }
+          const body = response.body as CandleResponse;
+          if (!body.candles || body.candles.length === 0) {
+            setError("No candle data available yet. The live feed needs time to collect candles.");
+            return;
+          }
+          setError(null);
+          setLatestPrice(body.latest_price);
+          setLatestTime(body.latest_time);
+          candleSeries.setData(
+            body.candles.map((c) => ({
+              time: c.time,
+              open: Number(c.open),
+              high: Number(c.high),
+              low: Number(c.low),
+              close: Number(c.close),
+            })),
+          );
+          fastSeries.setData(
+            body.fast_ema.map((p) => ({ time: p.time, value: Number(p.value) })),
+          );
+          slowSeries.setData(
+            body.slow_ema.map((p) => ({ time: p.time, value: Number(p.value) })),
+          );
+          chart.timeScale().fitContent();
+        })
+        .catch(() => {
+          if (!cancelled) setError("Failed to load candle data. Retrying…");
+        });
+    };
+    fetchData();
+    const retryTimer = setInterval(fetchData, 15000);
 
     const resizeObserver = new ResizeObserver((entries) => {
       if (entries.length > 0 && containerRef.current) {
@@ -117,6 +123,8 @@ export function CandleChart({ timeframe = "5m" }: { timeframe?: string }) {
     resizeObserver.observe(containerRef.current);
 
     return () => {
+      cancelled = true;
+      clearInterval(retryTimer);
       resizeObserver.disconnect();
       chart.remove();
       chartRef.current = null;
