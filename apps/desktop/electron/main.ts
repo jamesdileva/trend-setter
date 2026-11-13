@@ -59,16 +59,16 @@ if (!gotLock) {
       path.join(path.dirname(process.execPath), "resources", "engine", "trendbot-engine.exe"),
     ];
     const packagedEnginePath = candidates.find((p) => fs.existsSync(p));
-    console.log(
-      "[trend-setter] engine detection:",
-      JSON.stringify({
-        resourcesPath: process.resourcesPath,
-        appPath: app.getAppPath(),
-        execPath: process.execPath,
-        candidates,
-        found: packagedEnginePath ?? "NOT FOUND",
-      }),
-    );
+    // Diagnostic: write the detection result for debugging packaged builds.
+    try {
+      const diagDir = path.dirname(process.execPath);
+      fs.writeFileSync(
+        path.join(diagDir, "engine-detection.json"),
+        JSON.stringify({ candidates, found: packagedEnginePath ?? "NOT FOUND" }, null, 2),
+      );
+    } catch {
+      // diagnostic write is best effort
+    }
     supervisor = new EngineSupervisor({
       repoRoot: path.resolve(app.getAppPath(), "..", ".."),
       packagedEnginePath,

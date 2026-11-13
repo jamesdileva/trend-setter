@@ -3,7 +3,7 @@ productName: trend-setter
 copyright: Copyright © 2026 jamesdileva
 
 directories:
-  output: release-final
+  output: app-release
   buildResources: build
 
 files:
