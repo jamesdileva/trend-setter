@@ -41,6 +41,36 @@ const POLL_INTERVAL_MS = 2000;
 const HEALTH_TIMEOUT_MS = 1500;
 const STOP_TIMEOUT_MS = 10_000;
 const ENGINE_REQUEST_TIMEOUT_MS = 10_000;
+// The engine pipes stdout/stderr; an undrained pipe buffer fills after
+// ~20 minutes of request logging and blocks the engine's event loop, so
+// output is drained into a bounded tail and surfaced in error messages.
+const OUTPUT_TAIL_CHARS = 4000;
+const TAIL_IN_ERROR_CHARS = 600;
+// How long start() may take to first healthy response (PyInstaller cold
+// start plus first-run migrations on a fresh machine), and how many
+// consecutive missed health checks while running mark the engine unresponsive.
+const START_DEADLINE_MS = 90_000;
+const MAX_MISSED_HEALTH_CHECKS = 3;
+
+/**
+ * Keeps the last `limit` characters of a stream so drained engine output can
+ * be included in crash diagnostics without growing without bound.
+ */
+export class OutputTail {
+  private value = "";
+
+  constructor(private readonly limit: number = OUTPUT_TAIL_CHARS) {}
+
+  append(chunk: string | Buffer): void {
+    const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+    this.value = (this.value + text).slice(-this.limit);
+  }
+
+  tail(limit: number = this.limit): string {
+    const trimmed = this.value.trim();
+    return trimmed.length > limit ? `…${trimmed.slice(-limit)}` : trimmed;
+  }
+}
 
 export interface EngineResponse {
   status: number;
@@ -90,6 +120,11 @@ export class EngineSupervisor {
   private readonly spawnConfig: EngineSpawnConfig;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private status: EngineStatus = { state: "stopped", health: null, lastError: null };
+  private startedAt = 0;
+  private lastHealthyAt: number | null = null;
+  private missedHealthChecks = 0;
+  private stdoutTail = new OutputTail();
+  private stderrTail = new OutputTail();
 
   constructor(options: {
     repoRoot: string;
@@ -161,12 +196,24 @@ export class EngineSupervisor {
       return this.status; // duplicate-instance guard: one engine at a time
     }
     this.status = { state: "starting", health: null, lastError: null };
+    this.startedAt = Date.now();
+    this.lastHealthyAt = null;
+    this.missedHealthChecks = 0;
+    this.stdoutTail = new OutputTail();
+    this.stderrTail = new OutputTail();
     const child = spawn(this.spawnConfig.command, this.spawnConfig.args, {
       env: this.spawnConfig.env,
       stdio: ["ignore", "pipe", "pipe"],
     });
     this.child = child;
+    // Drain the engine's output streams. Without readers the OS pipe buffer
+    // fills and the engine blocks forever on its next write (frozen API).
+    child.stdout?.on("data", (chunk: Buffer) => this.stdoutTail?.append(chunk));
+    child.stderr?.on("data", (chunk: Buffer) => this.stderrTail?.append(chunk));
     child.on("error", (err: Error) => {
+      if (this.child !== child) {
+        return; // stale event from an already-replaced child
+      }
       this.child = null;
       this.stopPolling();
       this.status = {
@@ -176,6 +223,9 @@ export class EngineSupervisor {
       };
     });
     child.on("exit", (code: number | null) => {
+      if (this.child !== child) {
+        return; // stale event from an already-replaced child
+      }
       this.stopPolling();
       const wasStopping = this.stopping;
       this.stopping = false;
@@ -186,7 +236,7 @@ export class EngineSupervisor {
         this.status = {
           state: "crashed",
           health: null,
-          lastError: `engine exited unexpectedly (code ${code ?? "unknown"}) [command: ${this.spawnConfig.command}]`,
+          lastError: `engine exited unexpectedly (code ${code ?? "unknown"}) [command: ${this.spawnConfig.command}]${this.describeOutputTail()}`,
         };
       }
     });
@@ -249,15 +299,69 @@ export class EngineSupervisor {
       }
       const health = (await response.json()) as EngineHealth;
       if (this.child) {
+        this.lastHealthyAt = Date.now();
+        this.missedHealthChecks = 0;
         this.status = { state: "running", health, lastError: null };
       }
     } catch (err) {
       // Engine not ready yet (starting) or just lost. The exit handler
-      // surfaces real crashes; here we only reflect the lost heartbeat.
-      if (this.child && this.status.state === "running") {
-        const message = err instanceof Error ? err.message : String(err);
-        this.status = { state: "starting", health: null, lastError: `health check failed: ${message}` };
+      // surfaces real crashes; here we escalate when the engine stays
+      // unreachable — a frozen engine never exits on its own.
+      if (!this.child) {
+        return;
+      }
+      this.missedHealthChecks += 1;
+      const message = err instanceof Error ? err.message : String(err);
+      if (this.lastHealthyAt === null) {
+        // Never healthy since start(): give cold starts the full deadline.
+        if (Date.now() - this.startedAt > START_DEADLINE_MS) {
+          this.failUnresponsive(
+            `engine did not become healthy within ${Math.round(START_DEADLINE_MS / 1000)} seconds ` +
+              `(last check: ${message}). Stop the engine, then start it again.`,
+          );
+        }
+        return;
+      }
+      // Was running: a few consecutive misses mean the engine stopped responding.
+      if (this.missedHealthChecks >= MAX_MISSED_HEALTH_CHECKS) {
+        this.failUnresponsive(
+          `engine stopped responding (health check: ${message}). ` +
+            "Stop the engine, then start it again to recover.",
+        );
+        return;
+      }
+      if (this.status.state === "running") {
+        this.status = {
+          state: "starting",
+          health: null,
+          lastError: `health check failed: ${message}`,
+        };
       }
     }
+  }
+
+  /**
+   * Mark the engine as failed and detach+kill the (still alive but
+   * unresponsive) child so the user can start again without a manual stop.
+   * The child is detached before killing so its exit event is ignored as
+   * stale and does not overwrite the diagnostic status.
+   */
+  private failUnresponsive(message: string): void {
+    this.status = { state: "crashed", health: null, lastError: `${message}${this.describeOutputTail()}` };
+    const child = this.child;
+    this.child = null;
+    this.stopPolling();
+    if (child) {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // already gone
+      }
+    }
+  }
+
+  private describeOutputTail(): string {
+    const tail = this.stderrTail.tail(TAIL_IN_ERROR_CHARS);
+    return tail ? ` — engine output: ${tail}` : "";
   }
 }

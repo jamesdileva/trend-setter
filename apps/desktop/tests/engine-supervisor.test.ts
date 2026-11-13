@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import path from "node:path";
 import {
   EngineSupervisor,
+  OutputTail,
   newSessionToken,
   resolveEngineSpawnConfig,
 } from "../electron/process-manager";
@@ -64,6 +65,136 @@ describe("newSessionToken", () => {
     expect(first).toMatch(/^[0-9a-f]{64}$/);
     expect(second).toMatch(/^[0-9a-f]{64}$/);
     expect(first).not.toBe(second);
+  });
+});
+
+describe("OutputTail", () => {
+  it("keeps only the last `limit` characters", () => {
+    const tail = new OutputTail(10);
+    tail.append("0123456789");
+    tail.append("abcdefghij");
+    expect(tail.tail()).toBe("abcdefghij");
+  });
+
+  it("truncates long output with a leading ellipsis", () => {
+    const tail = new OutputTail(100);
+    tail.append("x".repeat(50));
+    expect(tail.tail(10).length).toBe(11);
+    expect(tail.tail(10)).toBe(`…${"x".repeat(10)}`);
+  });
+
+  it("returns an empty string when nothing was written", () => {
+    expect(new OutputTail().tail()).toBe("");
+  });
+});
+
+describe("EngineSupervisor health escalation", () => {
+  function supervisorWithFailingHealth(): EngineSupervisor & { restoreFetch: () => void } {
+    const supervisor = new EngineSupervisor({ repoRoot: path.join("/repo"), port: 8788 });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (() =>
+      Promise.reject(new Error("The operation was aborted due to timeout"))) as typeof fetch;
+    // Simulate a spawned child without launching one; pollHealth only needs
+    // the reference to be non-null (and kill() to exist for escalation).
+    const fakeChild = { kill: () => true } as unknown as import("node:child_process").ChildProcess;
+    (supervisor as unknown as { child: unknown }).child = fakeChild;
+    (supervisor as unknown as { stdoutTail: OutputTail }).stdoutTail = new OutputTail();
+    (supervisor as unknown as { stderrTail: OutputTail }).stderrTail = new OutputTail();
+    return Object.assign(supervisor, {
+      restoreFetch: () => {
+        globalThis.fetch = originalFetch;
+      },
+    });
+  }
+
+  it("stays in starting during the cold-start grace window", async () => {
+    const supervisor = supervisorWithFailingHealth();
+    try {
+      (supervisor as unknown as { startedAt: number }).startedAt = Date.now();
+      (supervisor as unknown as { lastHealthyAt: number | null }).lastHealthyAt = null;
+      (supervisor as unknown as { status: { state: string } }).status.state = "starting";
+      const poll = (
+        supervisor as unknown as { pollHealth: () => Promise<void> }
+      ).pollHealth.bind(supervisor);
+      await poll();
+      await poll();
+      expect(supervisor.getStatus().state).toBe("starting");
+    } finally {
+      (supervisor as unknown as { restoreFetch: () => void }).restoreFetch();
+    }
+  });
+
+  it("marks a never-healthy engine failed once the start deadline passes", async () => {
+    const supervisor = supervisorWithFailingHealth();
+    try {
+      (supervisor as unknown as { startedAt: number }).startedAt = Date.now() - 91_000;
+      (supervisor as unknown as { lastHealthyAt: number | null }).lastHealthyAt = null;
+      const poll = (
+        supervisor as unknown as { pollHealth: () => Promise<void> }
+      ).pollHealth.bind(supervisor);
+      await poll();
+      const status = supervisor.getStatus();
+      expect(status.state).toBe("crashed");
+      expect(status.lastError).toContain("did not become healthy within 90 seconds");
+      expect(status.lastError).toContain("Stop the engine, then start it again");
+      // The frozen child is detached so Start works without a manual stop.
+      expect((supervisor as unknown as { child: unknown }).child).toBeNull();
+    } finally {
+      (supervisor as unknown as { restoreFetch: () => void }).restoreFetch();
+    }
+  });
+
+  it("escalates to engine error after three consecutive missed checks while running", async () => {
+    const supervisor = supervisorWithFailingHealth();
+    try {
+      const internal = supervisor as unknown as {
+        startedAt: number;
+        lastHealthyAt: number | null;
+        missedHealthChecks: number;
+        pollHealth: () => Promise<void>;
+      };
+      internal.startedAt = Date.now();
+      internal.lastHealthyAt = Date.now() - 60_000; // was healthy, then went quiet
+      (supervisor as unknown as { status: { state: string } }).status.state = "running";
+      const poll = internal.pollHealth.bind(supervisor);
+      await poll();
+      expect(supervisor.getStatus().state).toBe("starting"); // grace window
+      await poll();
+      expect(supervisor.getStatus().state).toBe("starting");
+      await poll();
+      const status = supervisor.getStatus();
+      expect(status.state).toBe("crashed");
+      expect(status.lastError).toContain("engine stopped responding");
+      expect(status.lastError).toContain("Stop the engine, then start it again");
+      expect((supervisor as unknown as { child: unknown }).child).toBeNull();
+    } finally {
+      (supervisor as unknown as { restoreFetch: () => void }).restoreFetch();
+    }
+  });
+
+  it("clears the miss counter and returns to running on a successful check", async () => {
+    const supervisor = supervisorWithFailingHealth();
+    try {
+      globalThis.fetch = (() =>
+        Promise.resolve(
+          new Response(JSON.stringify({ status: "ok", engine_version: "0.1.0" }), { status: 200 }),
+        )) as typeof fetch;
+      const internal = supervisor as unknown as {
+        startedAt: number;
+        lastHealthyAt: number | null;
+        missedHealthChecks: number;
+        pollHealth: () => Promise<void>;
+      };
+      internal.startedAt = Date.now();
+      internal.lastHealthyAt = Date.now() - 60_000;
+      internal.missedHealthChecks = 2; // one more miss would escalate
+      await internal.pollHealth.bind(supervisor)();
+      expect(supervisor.getStatus().state).toBe("running");
+      expect(internal.missedHealthChecks).toBe(0);
+      expect(supervisor.getStatus().lastError).toBeNull();
+    } finally {
+      (supervisor as unknown as { restoreFetch: () => void }).restoreFetch();
+    }
   });
 });
 

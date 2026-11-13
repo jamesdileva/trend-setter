@@ -106,7 +106,11 @@ def main() -> None:
             / f"shutdown-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}.db",
         ),
     )
-    uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="info")
+    # access_log=False: per-request lines went to stderr, which the desktop
+    # supervisor pipes but cannot drain fast enough — the pipe buffer filled
+    # after ~20 minutes and blocked the engine's event loop (frozen API).
+    # Request activity is visible via the DB events and the file log instead.
+    uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="info", access_log=False)
 
 
 if __name__ == "__main__":
