@@ -47,3 +47,6 @@ engine/build/
 engine/trendbot-engine.spec
 apps/desktop/release-v2/
 apps/desktop/release/
+apps/desktop/dist-packaged/
+apps/desktop/dist-installer/
+apps/desktop/installer-output/

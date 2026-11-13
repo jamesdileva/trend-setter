@@ -51,15 +51,27 @@ if (!gotLock) {
   app.whenReady().then(() => {
     // Use the bundled engine exe when it exists (packaged mode);
     // fall back to the venv Python for development.
-    const packagedEnginePath = path.join(
-      process.resourcesPath,
-      "engine",
-      "trendbot-engine.exe",
+    // Check multiple possible locations because resourcesPath and
+    // getAppPath can resolve differently across packaging modes.
+    const candidates = [
+      path.join(process.resourcesPath, "engine", "trendbot-engine.exe"),
+      path.join(path.dirname(app.getAppPath()), "engine", "trendbot-engine.exe"),
+      path.join(path.dirname(process.execPath), "resources", "engine", "trendbot-engine.exe"),
+    ];
+    const packagedEnginePath = candidates.find((p) => fs.existsSync(p));
+    console.log(
+      "[trend-setter] engine detection:",
+      JSON.stringify({
+        resourcesPath: process.resourcesPath,
+        appPath: app.getAppPath(),
+        execPath: process.execPath,
+        candidates,
+        found: packagedEnginePath ?? "NOT FOUND",
+      }),
     );
-    const usePackagedEngine = fs.existsSync(packagedEnginePath);
     supervisor = new EngineSupervisor({
       repoRoot: path.resolve(app.getAppPath(), "..", ".."),
-      packagedEnginePath: usePackagedEngine ? packagedEnginePath : undefined,
+      packagedEnginePath,
     });
 
     ipcMain.handle("engine:get-status", () => supervisor?.getStatus() ?? null);
