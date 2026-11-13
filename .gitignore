@@ -42,3 +42,6 @@ Desktop.ini
 .DS_Store
 .idea/
 .vscode/
+apps/desktop/release/
+engine/build/
+engine/trendbot-engine.spec
