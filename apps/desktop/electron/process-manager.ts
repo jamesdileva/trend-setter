@@ -78,7 +78,12 @@ export class EngineSupervisor {
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private status: EngineStatus = { state: "stopped", health: null, lastError: null };
 
-  constructor(options: { repoRoot: string; platform?: NodeJS.Platform; port?: number }) {
+  constructor(options: {
+    repoRoot: string;
+    platform?: NodeJS.Platform;
+    port?: number;
+    packagedEnginePath?: string;
+  }) {
     this.port = options.port ?? DEFAULT_PORT;
     this.baseUrl = `http://127.0.0.1:${this.port}`;
     this.spawnConfig = resolveEngineSpawnConfig({ ...options, port: this.port, token: this.token });

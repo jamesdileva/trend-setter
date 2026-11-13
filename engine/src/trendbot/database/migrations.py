@@ -10,6 +10,8 @@ unchanged.
 
 from __future__ import annotations
 
+import sys
+
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -19,7 +21,28 @@ from alembic.config import Config
 from trendbot.database.backup import backup_database
 from trendbot.database.session import Database
 
-_ENGINE_ROOT = Path(__file__).resolve().parents[3]
+def _find_engine_root() -> Path:
+    """Find the engine root for Alembic config, handling both source tree
+    and PyInstaller bundle layouts."""
+    # Source tree: migrations.py is at src/trendbot/database/migrations.py
+    # → parents[3] = engine/
+    source_root = Path(__file__).resolve().parents[3]
+    if (source_root / "alembic.ini").exists():
+        return source_root
+    # PyInstaller bundle: data files are placed in _MEIPASS (onedir: _internal/)
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        bundled = Path(meipass)
+        if (bundled / "migrations").exists():
+            return bundled
+    # Fallback: the exe's own directory (onedir layout)
+    exe_dir = Path(sys.executable).resolve().parent
+    if (exe_dir / "migrations").exists():
+        return exe_dir
+    return source_root
+
+
+_ENGINE_ROOT = _find_engine_root()
 
 
 class MigrationError(RuntimeError):
@@ -27,9 +50,14 @@ class MigrationError(RuntimeError):
 
 
 def _alembic_config(url: str) -> Config:
+    script_location = _ENGINE_ROOT / "migrations"
     ini_path = _ENGINE_ROOT / "alembic.ini"
-    config = Config(str(ini_path))
-    config.set_main_option("script_location", str(_ENGINE_ROOT / "migrations"))
+    if ini_path.exists():
+        config = Config(str(ini_path))
+    else:
+        config = Config()
+        config.set_main_option("script_location", str(script_location))
+    config.set_main_option("script_location", str(script_location))
     config.set_main_option("sqlalchemy.url", url.replace("%", "%%"))
     return config
 

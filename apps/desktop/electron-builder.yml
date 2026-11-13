@@ -1,0 +1,36 @@
+appId: com.jamesdileva.trend-setter
+productName: trend-setter
+copyright: Copyright © 2026 jamesdileva
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - dist/**/*
+  - dist-electron/**/*
+  - "!**/*.ts"
+  - "!src/**"
+  - "!tests/**"
+  - "!electron/**"
+
+extraResources:
+  - from: ../../engine/dist/trendbot-engine
+    to: engine
+    filter: ["**/*"]
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: build/icon.png
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: trend-setter
+  artifactName: trend-setter-setup-${version}.exe
+  deleteAppDataOnUninstall: false
+  warningsAsErrors: false

@@ -48,8 +48,12 @@ if (!gotLock) {
   };
 
   app.whenReady().then(() => {
+    const packagedEnginePath = app.isPackaged
+      ? path.join(process.resourcesPath, "engine", "trendbot-engine.exe")
+      : undefined;
     supervisor = new EngineSupervisor({
       repoRoot: path.resolve(app.getAppPath(), "..", ".."),
+      packagedEnginePath,
     });
 
     ipcMain.handle("engine:get-status", () => supervisor?.getStatus() ?? null);

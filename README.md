@@ -2,7 +2,7 @@
 
 **Coinbase Automated Trend-Follower** — a local-first Windows desktop application for systematic BTC-USD and ETH-USD trading on Coinbase Advanced Trade: an Electron + React desktop shell driving a Python trading engine, with backtesting, paper trading by default, and live trading behind explicit, deliberate safeguards.
 
-> **Status: early development (roadmap sprints 0–1).** Nothing here places real orders. There are no profitability claims — backtests are estimates, not guarantees. See [architecture.md](architecture.md) §1 for the product principles.
+> **Status: sprints 0–12 complete.** Paper trading runs on live market data with simulated funds. No real orders are placed (live execution requires explicit arming). Backtests are estimates, not guarantees. See [architecture.md](architecture.md) §1 for the product principles.
 
 ## Documentation suite
 
@@ -47,7 +47,7 @@ trend-setter/
 | 0 | Architecture lock, Coinbase verification, risk register | **Done** — all 8 items verified against official docs |
 | 1 | Repo, dev environment, application skeleton | **Done** — desktop shell, engine loopback API, supervisor, fake adapter |
 | 2 | Database foundation, migrations, durable events | **Done** — 16 core tables, Alembic, repositories, backup/restore |
-| 3 | Coinbase connection wizard and secure credentials | **Done** — OS-backed secret store, JWT validation, wizard UI (real-key test pending) |
+| 3 | Coinbase connection wizard and secure credentials | **Done** — OS-backed secret store, JWT validation, wizard UI; real-key smoke test **passed** |
 | 4 | Historical market data and candle correctness | **Done** — windowed imports, validation, dedup, gaps, aggregation; live-API verified |
 | 5 | Live market data, reconnect, and backfill | **Done** — WS feed, heartbeats, reconnect, backfill, stale gate |
 | 6 | Baseline strategy and configuration | **Done** — EMA/RSI indicators, crossover decisions, versioned config, persisted signals |
@@ -55,8 +55,10 @@ trend-setter/
 | 8 | Risk manager and order lifecycle (mock exchange) | **Done** — risk gate, durable intents, timeout recovery, reconciliation |
 | 9 | Paper trading | **Done** — simulated funds, real pipeline, controls, restart-safe |
 | 10 | Live Coinbase execution integration | **Done** — live adapter, arming gates, restart disarm; real-key smoke test pending |
-| 11 | Main dashboard and nontechnical-user experience | Next |
-| 4–14 | Historical data → live data → strategy → backtest → risk → paper → live → packaging → audit | Not started |
+| 11 | Main dashboard and nontechnical-user experience | **Done** — candlestick chart, plain-language strategy help, paper card |
+| 12 | Windows packaging, installer, and lifecycle | **Done** — PyInstaller engine + NSIS installer built; VM testing deferred |
+| 13 | Operational readiness and paper soak test | Next |
+| 14 | Polish + adversarial audit | Not started |
 
 Progress details in [docs/sprints/](docs/sprints).
 
