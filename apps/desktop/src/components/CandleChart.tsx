@@ -4,6 +4,7 @@ import {
   LineSeries,
   createChart,
   type IChartApi,
+  type UTCTimestamp,
 } from "lightweight-charts";
 import { getDesktopApi } from "../services/desktopApi";
 
@@ -27,6 +28,16 @@ interface CandleResponse {
   rsi: LinePoint[];
   latest_price: string | null;
   latest_time: string | null;
+}
+
+/**
+ * The engine returns ISO timestamps ("2026-11-13T07:05:00Z") but
+ * lightweight-charts only accepts numeric UTC timestamps (or plain
+ * "YYYY-MM-DD" strings) — anything else throws inside setData, which
+ * surfaced as "Failed to load candle data. Retrying…" forever.
+ */
+function toChartTime(iso: string): UTCTimestamp {
+  return Math.floor(new Date(iso).getTime() / 1000) as UTCTimestamp;
 }
 
 export function CandleChart({ timeframe = "5m" }: { timeframe?: string }) {
@@ -93,7 +104,7 @@ export function CandleChart({ timeframe = "5m" }: { timeframe?: string }) {
           setLatestTime(body.latest_time);
           candleSeries.setData(
             body.candles.map((c) => ({
-              time: c.time,
+              time: toChartTime(c.time),
               open: Number(c.open),
               high: Number(c.high),
               low: Number(c.low),
@@ -101,15 +112,17 @@ export function CandleChart({ timeframe = "5m" }: { timeframe?: string }) {
             })),
           );
           fastSeries.setData(
-            body.fast_ema.map((p) => ({ time: p.time, value: Number(p.value) })),
+            body.fast_ema.map((p) => ({ time: toChartTime(p.time), value: Number(p.value) })),
           );
           slowSeries.setData(
-            body.slow_ema.map((p) => ({ time: p.time, value: Number(p.value) })),
+            body.slow_ema.map((p) => ({ time: toChartTime(p.time), value: Number(p.value) })),
           );
           chart.timeScale().fitContent();
         })
-        .catch(() => {
-          if (!cancelled) setError("Failed to load candle data. Retrying…");
+        .catch((err: unknown) => {
+          if (cancelled) return;
+          const message = err instanceof Error ? err.message : String(err);
+          setError(`Failed to load candle data: ${message} Retrying…`);
         });
     };
     fetchData();
