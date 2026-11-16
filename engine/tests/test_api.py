@@ -121,3 +121,72 @@ class TestStatusEndpoint:
                     json={"product_id": "BTC-USD", "side": "buy"},
                 )
             assert response.status_code == 404
+
+
+class TestNotificationsEndpoints:
+    """Email notification settings: token-gated, password write-only (Sprint 15)."""
+
+    def make_notifier_client(self, api_database, api_secrets):
+        from trendbot.notifications import NotificationService
+
+        notifier = NotificationService(api_database, api_secrets)
+        app = create_app(
+            local_token="s3cret",
+            database=api_database,
+            secret_store=api_secrets,
+            notifier=notifier,
+        )
+        return TestClient(app, client=("127.0.0.1", 51000))
+
+    def test_endpoints_require_the_session_token(self, api_database, api_secrets):
+        with self.make_notifier_client(api_database, api_secrets) as client:
+            assert client.get("/notifications/email").status_code == 401
+            assert client.post(
+                "/notifications/email", json={"enabled": False}
+            ).status_code == 401
+            assert client.post("/notifications/email/test").status_code == 401
+
+    def test_save_roundtrip_never_returns_the_password(self, api_database, api_secrets):
+        with self.make_notifier_client(api_database, api_secrets) as client:
+            headers = {"X-Local-Token": "s3cret"}
+            payload = {
+                "enabled": True,
+                "smtp_host": "smtp.example.com",
+                "smtp_port": 465,
+                "security": "ssl",
+                "username": "alerter@example.com",
+                "recipient": "me@example.com",
+                "password": "app-password-9",
+            }
+            saved = client.post("/notifications/email", json=payload, headers=headers)
+            assert saved.status_code == 200
+            status = client.get("/notifications/email", headers=headers).json()
+            assert status["available"] is True
+            assert status["enabled"] is True
+            assert status["smtp_host"] == "smtp.example.com"
+            assert status["has_password"] is True
+            body = str(status)
+            assert "app-password-9" not in body
+
+    def test_invalid_recipient_is_rejected_in_plain_language(self, api_database, api_secrets):
+        with self.make_notifier_client(api_database, api_secrets) as client:
+            response = client.post(
+                "/notifications/email",
+                json={"enabled": True, "smtp_host": "smtp.example.com",
+                      "recipient": "nope", "password": "x"},
+                headers={"X-Local-Token": "s3cret"},
+            )
+            assert response.status_code == 400
+            assert "email address" in response.json()["message"]
+
+    def test_unwired_notifier_reports_unavailable(self, api_database, api_secrets):
+        with make_client(
+            token="s3cret", database=api_database, secret_store=api_secrets
+        ) as client:
+            headers = {"X-Local-Token": "s3cret"}
+            assert client.get("/notifications/email", headers=headers).json() == {
+                "available": False
+            }
+            assert client.post(
+                "/notifications/email/test", headers=headers
+            ).status_code == 503

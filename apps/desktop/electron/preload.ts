@@ -32,6 +32,10 @@ const api = {
   getPaperStatus: () => ipcRenderer.invoke("paper:status"),
   getCandles: (timeframe: string) =>
     ipcRenderer.invoke("candles:get", { timeframe }),
+  getEmailNotifications: () => ipcRenderer.invoke("notifications:get-email"),
+  saveEmailNotifications: (payload: Record<string, unknown>) =>
+    ipcRenderer.invoke("notifications:save-email", payload),
+  testEmailNotifications: () => ipcRenderer.invoke("notifications:test-email"),
   openExternal: (url: string) => ipcRenderer.invoke("shell:open-external", url),
 };
 

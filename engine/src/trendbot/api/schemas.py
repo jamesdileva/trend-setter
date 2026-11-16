@@ -62,3 +62,20 @@ class PaperResetRequest(BaseModel):
     """Resetting the paper account wipes simulated history — confirm required."""
 
     confirm: bool = Field(default=False, description="Must be true to actually reset.")
+
+
+class EmailSettingsRequest(BaseModel):
+    """Email notification settings. The password is write-only: it is stored
+    in the OS credential store and never returned by any endpoint."""
+
+    enabled: bool = Field(default=False)
+    smtp_host: str = Field(default="", max_length=253)
+    smtp_port: int = Field(default=465, ge=1, le=65535)
+    security: str = Field(default="ssl", description="Either 'ssl' (port 465) or 'starttls' (587).")
+    username: str = Field(default="", max_length=320)
+    recipient: str = Field(default="", max_length=320)
+    password: str | None = Field(
+        default=None,
+        max_length=512,
+        description="App-password. Omit/empty to keep the stored one.",
+    )

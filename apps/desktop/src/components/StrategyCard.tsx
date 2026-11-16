@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import type { StrategyConfigView, StrategyDecisionView } from "../types/electron";
+import type {
+  PaperLoopStatus,
+  StrategyConfigView,
+  StrategyDecisionView,
+} from "../types/electron";
 import { getDesktopApi } from "../services/desktopApi";
 
 const SIGNAL_LABELS: Record<string, string> = {
@@ -26,6 +30,7 @@ const DEFAULT_DRAFT: Draft = { fast: "20", slow: "50", rsi: "14", ceiling: "70" 
 export function StrategyCard() {
   const api = getDesktopApi();
   const [config, setConfig] = useState<StrategyConfigView | null>(null);
+  const [loop, setLoop] = useState<PaperLoopStatus | null>(null);
   const [draft, setDraft] = useState<Draft>(DEFAULT_DRAFT);
   const [decision, setDecision] = useState<StrategyDecisionView | null>(null);
   const [notice, setNotice] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
@@ -57,6 +62,26 @@ export function StrategyCard() {
     return () => {
       cancelled = true;
     };
+  }, [api]);
+
+  // The automated loop's liveness: last decision, last evaluated candle.
+  useEffect(() => {
+    if (!api) {
+      return;
+    }
+    const refresh = (): void => {
+      void api
+        .getPaperStatus()
+        .then((response) => {
+          if (response && typeof response.body === "object" && response.body !== null) {
+            setLoop(response.body as PaperLoopStatus);
+          }
+        })
+        .catch(() => undefined);
+    };
+    refresh();
+    const timer = setInterval(refresh, 10000);
+    return () => clearInterval(timer);
   }, [api]);
 
   const handleSave = useCallback(async () => {
@@ -141,6 +166,62 @@ export function StrategyCard() {
           strategy responds.
         </p>
       </details>
+
+      <div className="current-run">
+        <h3>What's running right now</h3>
+        {config?.configured && config.config ? (
+          <>
+            <p className="meta">
+              Watching <b>{config.config.product_id}</b> on{" "}
+              <b>{config.config.timeframe === "1h" ? "hourly" : config.config.timeframe}</b>{" "}
+              candles — the engine checks the strategy automatically every time a candle
+              completes.
+            </p>
+            <p className="meta">
+              Fast EMA {config.config.fast_ema_period} · slow EMA {config.config.slow_ema_period} ·
+              RSI {config.config.rsi_period}, buys only when RSI is below{" "}
+              {config.config.rsi_entry_ceiling}.
+            </p>
+            <p className="meta">
+              Automated checking:{" "}
+              <b className={loop?.running ? "state-running" : "state-stopped"}>
+                {loop?.running ? "active" : "waiting for candles"}
+              </b>
+              {loop?.last_processed_candle &&
+                ` · last checked candle ${loop.last_processed_candle.replace("T", " ").slice(0, 16)} UTC`}
+            </p>
+            {loop?.last_decision && (
+              <p className="meta">
+                Last automated decision:{" "}
+                <b>{SIGNAL_LABELS[loop.last_decision] ?? loop.last_decision}</b>
+                {loop.last_decision_reason && ` (${loop.last_decision_reason.replace(/_/g, " ")})`}
+                {loop.details?.last_error ? ` — problem: ${String(loop.details.last_error)}` : ""}
+              </p>
+            )}
+            {config.recent_signals && config.recent_signals.length > 0 && (
+              <details className="strategy-help">
+                <summary>Recent automated decisions ({config.recent_signals.length})</summary>
+                {config.recent_signals.slice(0, 8).map((signal) => (
+                  <p className="meta" key={`${signal.candle_time}-${signal.decision}`}>
+                    <b>{signal.decision.toUpperCase()}</b> on candle{" "}
+                    {signal.candle_time.replace("T", " ").slice(0, 16)} UTC — {signal.explanation}
+                  </p>
+                ))}
+              </details>
+            )}
+            {(config.recent_signals?.length ?? 0) === 0 && (
+              <p className="meta">
+                No automated decisions recorded yet — the engine records one every time a
+                candle closes.
+              </p>
+            )}
+          </>
+        ) : (
+          <p className="meta">
+            No strategy is saved yet — the automated loop starts once you save settings below.
+          </p>
+        )}
+      </div>
 
       <div className="strategy-fields">
         <label>

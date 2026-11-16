@@ -183,6 +183,19 @@ class CandleRepository:
                 .limit(1)
             )
 
+    def oldest_start(self, product_id: str, granularity: str) -> datetime | None:
+        """Oldest stored candle start for the product/timeframe."""
+        with self._db.session() as session:
+            return session.scalar(
+                select(CandleRecord.start_time)
+                .where(
+                    CandleRecord.product_id == product_id,
+                    CandleRecord.granularity == granularity,
+                )
+                .order_by(CandleRecord.start_time.asc())
+                .limit(1)
+            )
+
 
 class FillRepository:
     """Idempotent fill storage keyed on the composite fill identity."""

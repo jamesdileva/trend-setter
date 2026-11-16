@@ -67,6 +67,27 @@ export interface StrategyDecisionView {
   message?: string;
 }
 
+export interface PaperLoopStatus {
+  running?: boolean;
+  last_decision?: string | null;
+  last_decision_reason?: string | null;
+  last_processed_candle?: string | null;
+  pending?: string | null;
+  processed_candles?: number;
+  details?: Record<string, unknown>;
+}
+
+export interface EmailNotificationSettings {
+  available: boolean;
+  enabled: boolean;
+  smtp_host: string;
+  smtp_port: number;
+  security: string;
+  username: string;
+  recipient: string;
+  has_password: boolean;
+}
+
 export interface DesktopApi {
   getEngineStatus(): Promise<EngineStatus | null>;
   startEngine(): Promise<EngineStatus | null>;
@@ -84,6 +105,9 @@ export interface DesktopApi {
   paperControl(path: string, body: Record<string, unknown>): Promise<EngineResponse | null>;
   getPaperStatus(): Promise<EngineResponse | null>;
   getCandles(timeframe: string): Promise<EngineResponse | null>;
+  getEmailNotifications(): Promise<EngineResponse | null>;
+  saveEmailNotifications(payload: Record<string, unknown>): Promise<EngineResponse | null>;
+  testEmailNotifications(): Promise<EngineResponse | null>;
   openExternal(url: string): Promise<void>;
 }
 

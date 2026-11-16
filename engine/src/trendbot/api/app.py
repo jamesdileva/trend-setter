@@ -37,6 +37,7 @@ from trendbot import __version__
 from trendbot.api.schemas import (
     BacktestRunRequest,
     CredentialRequest,
+    EmailSettingsRequest,
     PaperResetRequest,
     StrategyConfigRequest,
     StrategyEvaluateRequest,
@@ -61,6 +62,7 @@ from trendbot.database.models import EngineEvent
 from trendbot.database.repositories import BacktestRepository, CandleRepository, PositionRepository
 from trendbot.database.session import Database
 from trendbot.market_data.granularity import granularity_for_timeframe, granularity_seconds
+from trendbot.notifications import EmailSettings, NotificationConfigError, NotificationService
 from trendbot.paper.account import PaperAccount, ResetNotConfirmedError
 from trendbot.security.secret_store import SecretStore
 from trendbot.strategies.config import EmaRsiConfig
@@ -92,6 +94,9 @@ def create_app(
     coinbase_transport: httpx.BaseTransport | None = None,
     feed_factory: Callable[[], Any] | None = None,
     market_status_provider: Callable[[], dict[str, object]] | None = None,
+    paper_loop_factory: Callable[[], Any] | None = None,
+    paper_loop_status_provider: Callable[[], dict[str, object]] | None = None,
+    notifier: NotificationService | None = None,
     on_shutdown: Callable[[], object] | None = None,
 ) -> FastAPI:
     """Build the engine app with explicit wiring.
@@ -103,6 +108,11 @@ def create_app(
     ``feed_factory`` (when provided) starts the live market-data feed as a
     background task for the app's lifetime; ``market_status_provider``
     supplies its status snapshot for the local API and the UI.
+
+    ``paper_loop_factory`` (when provided) starts the automated paper
+    trading loop as a background task; ``paper_loop_status_provider``
+    exposes its liveness snapshot to ``/paper/status``. ``notifier`` sends
+    fill/problem emails and backs the notification endpoints.
     """
     runtime = EngineRuntime()
     paper_account = PaperAccount(database)
@@ -126,16 +136,29 @@ def create_app(
         if feed_factory is not None:
             feed = feed_factory()
             feed_task = asyncio.create_task(feed.run())
+        paper_task: asyncio.Task[None] | None = None
+        if paper_loop_factory is not None:
+            paper_loop = paper_loop_factory()
+            paper_task = asyncio.create_task(paper_loop.run())
+            if notifier is not None:
+                # Rate-limited: lets the user know the engine came back up
+                # after a restart/crash (the 24/7 trader was offline).
+                notifier.problem(
+                    "engine_restarted",
+                    "The trend-setter engine (re)started. Paper trading resumes "
+                    "automatically if it was active before.",
+                )
         try:
             yield
         finally:
             runtime.state = EngineState.STOPPING
-            if feed_task is not None:
-                feed_task.cancel()
-                try:
-                    await feed_task
-                except asyncio.CancelledError:
-                    pass
+            for task in (paper_task, feed_task):
+                if task is not None:
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
             if on_shutdown is not None:
                 try:
                     on_shutdown()
@@ -337,7 +360,7 @@ def create_app(
         position = PositionRepository(database).get("BTC-USD")
         cash = paper_account.cash()
         size = (position.size if position else Decimal(0)) or Decimal(0)
-        return {
+        response: dict[str, object] = {
             "warning": PAPER_WARNING_TEXT,
             "account_kind": "paper",
             "mode": mode.value,
@@ -363,6 +386,11 @@ def create_app(
                 for row in paper_account.snapshots(limit=10)
             ],
         }
+        if paper_loop_status_provider is not None:
+            # Loop liveness: automated evaluation state (running, last decision,
+            # last processed candle) from the PaperLoopRunner's shared status.
+            response.update(paper_loop_status_provider())
+        return response
 
     @app.get("/market-data/status", dependencies=[Depends(require_local_token)])
     def market_data_status() -> dict[str, object]:
@@ -370,6 +398,67 @@ def create_app(
         if market_status_provider is None:
             return {"running": False, "state": "not_wired"}
         return {"running": True, **market_status_provider()}
+
+    @app.get("/notifications/email", dependencies=[Depends(require_local_token)])
+    def notification_email_status() -> dict[str, object]:
+        """Email notification settings. The password is never included."""
+        if notifier is None:
+            return {"available": False}
+        settings = notifier.load_settings()
+        return {
+            "available": True,
+            "enabled": settings.enabled,
+            "smtp_host": settings.smtp_host,
+            "smtp_port": settings.smtp_port,
+            "security": settings.security,
+            "username": settings.username,
+            "recipient": settings.recipient,
+            "has_password": notifier.has_password(),
+        }
+
+    @app.post("/notifications/email", dependencies=[Depends(require_local_token)])
+    def save_notification_email(payload: EmailSettingsRequest) -> JSONResponse:
+        """Save email notification settings; the app-password goes to the
+        OS credential store and is never persisted in the database."""
+        if notifier is None:
+            return JSONResponse(
+                status_code=503,
+                content={"status": "unavailable", "message": "Notifications are not wired."},
+            )
+        try:
+            notifier.save_settings(
+                EmailSettings(
+                    enabled=payload.enabled,
+                    smtp_host=payload.smtp_host.strip(),
+                    smtp_port=payload.smtp_port,
+                    security=payload.security.strip().lower(),
+                    username=payload.username.strip(),
+                    recipient=payload.recipient.strip(),
+                    password=(payload.password or None),
+                )
+            )
+        except NotificationConfigError as exc:
+            return JSONResponse(status_code=400, content={"status": "invalid", "message": str(exc)})
+        return JSONResponse(status_code=200, content={"status": "saved"})
+
+    @app.post("/notifications/email/test", dependencies=[Depends(require_local_token)])
+    def test_notification_email() -> JSONResponse:
+        """Send a test email so the user can verify the setup end to end."""
+        if notifier is None:
+            return JSONResponse(
+                status_code=503,
+                content={"status": "unavailable", "message": "Notifications are not wired."},
+            )
+        try:
+            notifier.send_test()
+        except NotificationConfigError as exc:
+            return JSONResponse(status_code=400, content={"sent": False, "message": str(exc)})
+        except Exception as exc:  # noqa: BLE001 - report send failures plainly
+            return JSONResponse(
+                status_code=502,
+                content={"sent": False, "message": f"Could not send the test email: {exc}"},
+            )
+        return JSONResponse(status_code=200, content={"sent": True})
 
     @app.post("/strategy/config", dependencies=[Depends(require_local_token)])
     def save_strategy_config(payload: StrategyConfigRequest) -> JSONResponse:

@@ -30,6 +30,9 @@ from trendbot.market_data.backfill import GapBackfiller
 from trendbot.market_data.live_feed import PUBLIC_WS_URL, CandleFeed, FeedStatus
 from trendbot.market_data.source import build_fetch_page
 from trendbot.market_data.ws_transport import websockets_transport_factory
+from trendbot.notifications import NotificationService
+from trendbot.paper.engine import PaperStatus
+from trendbot.paper.runner import PaperLoopRunner
 from trendbot.security.secret_store import default_secret_store
 
 DEFAULT_PORT = 8788
@@ -66,7 +69,10 @@ def main() -> None:
     except MigrationError as exc:
         raise SystemExit(f"Engine startup failed during a database upgrade: {exc}") from exc
 
+    secret_store = default_secret_store()
+    notifier = NotificationService(database, secret_store)
     feed_status = FeedStatus()
+    paper_status = PaperStatus()
     backfiller = GapBackfiller(
         database,
         fetch_builder=lambda product_id, timeframe: build_fetch_page(
@@ -89,7 +95,11 @@ def main() -> None:
             events=EngineEventRepository(database),
             status=feed_status,
             on_gap=on_gap,
+            notifier=notifier,
         )
+
+    def paper_loop_factory() -> PaperLoopRunner:
+        return PaperLoopRunner(database, status=paper_status, notifier=notifier)
 
     # Restart never silently resumes live trading (R-06): force-disarm.
     LiveArmingController(database).force_disarm()
@@ -97,9 +107,12 @@ def main() -> None:
     app = create_app(
         os.environ.get("TRENDBOT_LOCAL_TOKEN"),
         database=database,
-        secret_store=default_secret_store(),
+        secret_store=secret_store,
         feed_factory=feed_factory,
         market_status_provider=feed_status.snapshot,
+        paper_loop_factory=paper_loop_factory,
+        paper_loop_status_provider=paper_status.snapshot,
+        notifier=notifier,
         on_shutdown=lambda: backup_database(
             database,
             data_dir / "backups"

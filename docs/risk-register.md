@@ -13,6 +13,7 @@ Severity: Critical / High / Medium / Low. Likelihood: based on current design ev
 | R-05 | Database failure, corruption, or migration loss | High | Low | SQLite transactions, FK/journal/busy-timeout setup; backup before migrations; integrity + restore tooling (architecture.md §14) | Open |
 | R-06 | Restart/crash/update silently resumes live trading | Critical | Medium | Disarmed-by-default lifecycle; reconciliation required before live resume (architecture.md §5, §13) | Open |
 | R-07 | Dependency or supply-chain compromise | Medium | Low | Pinned dependency versions, committed lockfiles, dependency review (implementation.md §3) | Open |
+| R-08 | WS market-data feed instability (observed: 26k gap events, 14 disconnects in 4 days on the operator's machine — DNS failures, handshake timeouts) silently degrades evaluation freshness | Medium | High | Automatic reconnect + REST gap backfill; stale-data risk gate blocks entries on stale candles; hourly rollup only derives fully complete hours (Sprint 15); rate-limited disconnect email alerts give visibility | Open |
 
 ## How to add a risk
 

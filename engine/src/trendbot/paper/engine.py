@@ -32,6 +32,7 @@ from trendbot.execution.intents import IntentService
 from trendbot.execution.state_machine import ACKNOWLEDGED, FILLED, OPEN, SUBMITTING
 from trendbot.market_data.candles import Candle
 from trendbot.market_data.granularity import granularity_for_timeframe, granularity_seconds
+from trendbot.notifications import NotificationService
 from trendbot.paper.account import PaperAccount
 from trendbot.risk.daily import DailyLedger
 from trendbot.risk.manager import RiskContext, RiskManager
@@ -57,6 +58,7 @@ class PaperStatus:
     session_pnl: str = "0"
     last_decision: str | None = None
     last_decision_reason: str | None = None
+    last_processed_candle: str | None = None
     pending: str | None = None
     processed_candles: int = 0
     details: dict[str, object] = field(default_factory=dict)
@@ -74,6 +76,7 @@ class PaperStatus:
             "session_pnl": self.session_pnl,
             "last_decision": self.last_decision,
             "last_decision_reason": self.last_decision_reason,
+            "last_processed_candle": self.last_processed_candle,
             "pending": self.pending,
             "processed_candles": self.processed_candles,
             "details": self.details,
@@ -97,6 +100,7 @@ class PaperTradingEngine:
         poll_seconds: float = 2.0,
         stale_after_seconds: float = 300.0,
         status: PaperStatus | None = None,
+        notifier: NotificationService | None = None,
     ) -> None:
         self._db = database
         self._adapter = adapter
@@ -110,6 +114,7 @@ class PaperTradingEngine:
         self.poll_seconds = poll_seconds
         self.stale_after_seconds = stale_after_seconds
         self.status = status or PaperStatus()
+        self._notifier = notifier
 
         self.strategy = get_strategy(STRATEGY_NAME)
         self.risk = RiskManager()
@@ -146,6 +151,10 @@ class PaperTradingEngine:
     def stop(self) -> None:
         self._stop_requested = True
 
+    def recover(self) -> None:
+        """Public restart/rebuild recovery (see ``_recover``)."""
+        self._recover()
+
     def _recover(self) -> None:
         """Restart recovery (documented policy): cancel in-flight intents
         and adopt persisted positions/cash. Persisted state already
@@ -169,6 +178,7 @@ class PaperTradingEngine:
         latest = self.candles.latest_complete_start(self.product_id, self.granularity)
         if latest is None:
             return None
+        self.status.last_processed_candle = latest.strftime("%Y-%m-%dT%H:%M:%SZ")
         if self._last_processed is None:
             # First run: seed the window with history. The newest candle is
             # processed as a live candle on the next call.
@@ -191,7 +201,26 @@ class PaperTradingEngine:
                 actions.append(action)
         self._last_processed = latest
         self.status.processed_candles += len(fresh)
+        self._refresh_status()
         return "; ".join(actions) if actions else None
+
+    def _refresh_status(self) -> None:
+        """Mirror the account/position state into the shared status snapshot."""
+        latest_candle = self._window[-1] if self._window else None
+        size = self._position_size()
+        cash = self.account.cash()
+        self.status.cash = str(cash)
+        self.status.position_size = str(size)
+        position = self.positions.get(self.product_id)
+        self.status.position_side = position.side if position and size else "flat"
+        if latest_candle is not None:
+            equity = cash + size * latest_candle.close
+            self.status.equity = str(equity)
+            try:
+                self.status.session_pnl = str(equity - self.account.starting_balance())
+            except Exception:  # noqa: BLE001 - status is display-only
+                pass
+        self.status.pending = self._pending.value if self._pending is not None else None
 
     def _seed_window(self, latest: datetime) -> None:
         required = self.strategy.required_history(self.config)
@@ -309,6 +338,9 @@ class PaperTradingEngine:
         self.intents.intents().mark(intent_id, FILLED)
         notional = self._pending_base * fill_price
         self.account.apply_entry(notional, fill.commission, now=candle.start_time)
+        self._notify_fill(
+            side="buy", size=self._pending_base, fill_price=fill_price, fee=fill.commission
+        )
         return f"entry filled at {fill_price} (+fees)"
 
     def _fill_exit(self, candle: Candle, moment: datetime) -> str:
@@ -337,7 +369,26 @@ class PaperTradingEngine:
         self.intents.intents().mark(intent_id, FILLED)
         proceeds = exit_size * fill_price
         self.account.apply_exit(proceeds, fill.commission, now=candle.start_time)
+        self._notify_fill(
+            side="sell", size=exit_size, fill_price=fill_price, fee=fill.commission
+        )
         return f"exit filled at {fill_price} (+fees)"
+
+    def _notify_fill(
+        self, *, side: str, size: Decimal, fill_price: Decimal, fee: Decimal
+    ) -> None:
+        """Best-effort email on a fill; notifications never raise into the loop."""
+        if self._notifier is None:
+            return
+        self._notifier.order_filled(
+            mode="paper",
+            side=side,
+            product_id=self.product_id,
+            base_size=str(size.normalize()),
+            price=str(fill_price),
+            fee=str(fee),
+            cash_after=str(self.account.cash()),
+        )
 
     def _request(
         self,

@@ -44,6 +44,7 @@ from trendbot.market_data.ws_events import (
     normalize_message,
 )
 from trendbot.market_data.ws_transport import TransportFactory, WsConnection, WsConnectionLost
+from trendbot.notifications import NotificationService
 
 PUBLIC_WS_URL = "wss://advanced-trade-ws.coinbase.com"
 STALE_AFTER_SECONDS = 15.0
@@ -99,6 +100,7 @@ class CandleFeed:
         events: EngineEventRepository | None = None,
         status: FeedStatus | None = None,
         on_gap: Callable[[str, str, datetime, datetime], Awaitable[None]] | None = None,
+        notifier: NotificationService | None = None,
         stale_after: float = STALE_AFTER_SECONDS,
         base_delay: float = RECONNECT_BASE_DELAY,
         max_delay: float = RECONNECT_MAX_DELAY,
@@ -112,6 +114,7 @@ class CandleFeed:
         self._events = events
         self.status = status or FeedStatus()
         self._on_gap = on_gap  # async (product_id, timeframe, gap_start, gap_end)
+        self._notifier = notifier
         self.stale_after = stale_after
         self.base_delay = base_delay
         self.max_delay = max_delay
@@ -203,6 +206,12 @@ class CandleFeed:
         self.status.last_error = detail
         self.status.state = "reconnecting"
         self._record_event("ws_disconnected", detail, dedupe_key=None)
+        if self._notifier is not None:
+            self._notifier.problem(
+                "ws_disconnected",
+                f"The market-data feed disconnected and is reconnecting "
+                f"automatically ({detail}).",
+            )
         self._fire_gaps(now)
 
     def _fire_gaps(self, now: datetime) -> None:

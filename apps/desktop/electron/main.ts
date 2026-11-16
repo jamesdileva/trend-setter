@@ -108,6 +108,15 @@ if (!gotLock) {
     ipcMain.handle("candles:get", (_event, payload: { timeframe: string }) =>
       supervisor?.engineRequest(`/candles?product_id=BTC-USD&timeframe=${payload.timeframe}`),
     );
+    ipcMain.handle("notifications:get-email", () =>
+      supervisor?.engineRequest("/notifications/email"),
+    );
+    ipcMain.handle("notifications:save-email", (_event, payload: Record<string, unknown>) =>
+      supervisor?.engineRequest("/notifications/email", "POST", payload),
+    );
+    ipcMain.handle("notifications:test-email", () =>
+      supervisor?.engineRequest("/notifications/email/test", "POST"),
+    );
 
     ipcMain.handle("shell:open-external", (_event, url: string) => {
       if (!isAllowedExternalUrl(url)) {

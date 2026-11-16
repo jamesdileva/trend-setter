@@ -4,6 +4,7 @@ import { getDesktopApi } from "../services/desktopApi";
 import { BacktestCard } from "../components/BacktestCard";
 import { CandleChart } from "../components/CandleChart";
 import { ConnectionCard } from "../components/ConnectionCard";
+import { NotificationsCard } from "../components/NotificationsCard";
 import { PaperCard } from "../components/PaperCard";
 import { StrategyCard } from "../components/StrategyCard";
 
@@ -124,6 +125,8 @@ export function App() {
       <BacktestCard />
 
       <ConnectionCard />
+
+      <NotificationsCard />
 
       <footer className="app-footer">
         Paper mode by default. No real orders are placed. Live trading is a separate, deliberate
