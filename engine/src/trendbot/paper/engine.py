@@ -220,7 +220,9 @@ class PaperTradingEngine:
         self.status.cash = str(cash)
         self.status.position_size = str(size)
         position = self.positions.get(self.product_id)
-        self.status.position_side = position.side if position and size else "flat"
+        self.status.position_side = (
+            (position.side or "flat") if position and size else "flat"
+        )
         if latest_candle is not None:
             equity = cash + size * latest_candle.close
             self.status.equity = str(equity)
