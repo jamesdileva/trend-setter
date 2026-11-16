@@ -87,6 +87,26 @@ class StrategyEngine:
             return None
         return self._config_from_row(row.config_json)
 
+    def record_decision(self, decision: StrategyDecision) -> None:
+        """Persist one decision made outside the manual evaluate endpoint.
+
+        Used by the automated paper loop so the dashboard's decision history
+        reflects what the loop actually decided (deduped per candle by the
+        repository). The config row is resolved by the decision's hash; a
+        missing row is saved as the active config, mirroring ``evaluate``.
+        """
+        config = self.current_config()
+        if config is None or decision.config_hash != config.config_hash():
+            return  # decision made under a different config; don't mislabel it
+        config_row = self._configs.get_by_hash(STRATEGY_NAME, decision.config_hash)
+        if config_row is None:
+            config_row = self._configs.save_active(
+                name=STRATEGY_NAME,
+                config_json=asdict(config),
+                config_hash=decision.config_hash,
+            )
+        self._signals.record(decision, strategy_config_id=config_row.id)
+
     def evaluate(
         self, product_id: str | None = None, timeframe: str | None = None
     ) -> StrategyDecision:

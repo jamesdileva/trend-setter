@@ -63,6 +63,15 @@ def candles_upto(count: int) -> list[Candle]:
     ]
 
 
+def db_signals(db):
+    from sqlalchemy import select
+
+    from trendbot.database.models import Signal
+
+    with db.session() as session:
+        return session.scalars(select(Signal)).all()
+
+
 def make_runner(db, notifier=None, clock=None) -> PaperLoopRunner:
     # Injectable clock: the risk gate correctly rejects entries evaluated
     # against stale data, so `now` must track the newest candle (the step
@@ -136,6 +145,9 @@ class TestAutomatedTrade:
 
         # The intent walked the full state machine (filled = resolved).
         assert OrderIntentRepository(db).list_unresolved() == []
+        # The automated decision is persisted for the dashboard history.
+        signals = db_signals(db)
+        assert any(row.decision == "buy" for row in signals)
         position = PositionRepository(db).get("BTC-USD")
         assert position is not None
         assert position.size == Decimal("2.5")

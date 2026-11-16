@@ -99,6 +99,7 @@ class PaperLoopRunner:
                 config=config,
                 status=self.status,
                 notifier=self._notifier,
+                signal_recorder=self._strategy_engine.record_decision,
             )
             self._engine.recover()
             self.status.details["last_config_change"] = (

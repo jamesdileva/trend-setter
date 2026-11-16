@@ -17,6 +17,7 @@ persisted positions/cash.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
@@ -38,7 +39,12 @@ from trendbot.risk.daily import DailyLedger
 from trendbot.risk.manager import RiskContext, RiskManager
 from trendbot.risk.sizing import size_entry
 from trendbot.strategies.config import STRATEGY_NAME, EmaRsiConfig
-from trendbot.strategies.decisions import FLAT_POSITION, SignalType, StrategyPosition
+from trendbot.strategies.decisions import (
+    FLAT_POSITION,
+    SignalType,
+    StrategyDecision,
+    StrategyPosition,
+)
 from trendbot.strategies.registry import get_strategy
 
 PAPER_WARNING = (
@@ -101,6 +107,7 @@ class PaperTradingEngine:
         stale_after_seconds: float = 300.0,
         status: PaperStatus | None = None,
         notifier: NotificationService | None = None,
+        signal_recorder: Callable[[StrategyDecision], None] | None = None,
     ) -> None:
         self._db = database
         self._adapter = adapter
@@ -115,6 +122,7 @@ class PaperTradingEngine:
         self.stale_after_seconds = stale_after_seconds
         self.status = status or PaperStatus()
         self._notifier = notifier
+        self._signal_recorder = signal_recorder
 
         self.strategy = get_strategy(STRATEGY_NAME)
         self.risk = RiskManager()
@@ -258,6 +266,12 @@ class PaperTradingEngine:
         )
         self.status.last_decision = decision.signal.value
         self.status.last_decision_reason = decision.reason_code
+        if self._signal_recorder is not None:
+            try:
+                self._signal_recorder(decision)
+            except Exception:  # noqa: BLE001 - recording must not break trading
+                self.status.details["last_signal_record_error"] = "could not record the decision"
+
 
         # 4) act on the decision (fills happen at the NEXT open).
         if decision.signal == SignalType.BUY and self._position_size() == 0:
