@@ -35,6 +35,7 @@ from starlette.middleware.base import RequestResponseEndpoint
 
 from trendbot import __version__
 from trendbot.api.schemas import (
+    BacktestCompareRequest,
     BacktestRunRequest,
     CredentialRequest,
     EmailSettingsRequest,
@@ -52,6 +53,7 @@ from trendbot.application.coinbase_connection import (
 )
 from trendbot.application.live_trading import LiveArmingController
 from trendbot.application.state import EngineRuntime, EngineState
+from trendbot.application.strategy_compare import compare_strategies
 from trendbot.application.strategy_engine import (
     StrategyEngine,
     StrategyNotConfiguredError,
@@ -556,6 +558,35 @@ def create_app(
                 initial_quote=Decimal(str(payload.initial_quote)),
                 position_size_quote=Decimal(str(payload.position_size_quote)),
                 in_sample_fraction=payload.in_sample_fraction,
+            )
+        except InsufficientDataError as exc:
+            return JSONResponse(
+                status_code=409,
+                content={"status": "insufficient_data", "message": str(exc)},
+            )
+        except Exception as exc:  # noqa: BLE001 - plain-language validation errors
+            return JSONResponse(
+                status_code=400,
+                content={"status": "invalid_request", "message": str(exc)},
+            )
+        return JSONResponse(status_code=200, content=result)
+
+    @app.post("/backtest/compare", dependencies=[Depends(require_local_token)])
+    def compare_backtests(payload: BacktestCompareRequest) -> JSONResponse:
+        """Rank candidate strategies over stored candles (small grids, OOS-ranked).
+
+        Read-only for trading state: nothing here changes the active strategy
+        or places orders; the ranking is advisory.
+        """
+        try:
+            start = datetime.fromisoformat(payload.start) if payload.start else None
+            end = datetime.fromisoformat(payload.end) if payload.end else None
+            result = compare_strategies(
+                database,
+                product_id=payload.product_id,
+                timeframe=payload.timeframe,
+                start=start,
+                end=end,
             )
         except InsufficientDataError as exc:
             return JSONResponse(

@@ -25,7 +25,7 @@ from typing import TypedDict
 from trendbot.backtesting.assumptions import FeeAssumptions
 from trendbot.market_data.candles import Candle
 from trendbot.strategies.base import Strategy
-from trendbot.strategies.config import EmaRsiConfig
+from trendbot.strategies.config import StrategyConfig
 from trendbot.strategies.decisions import FLAT_POSITION, SignalType, StrategyPosition
 
 END_OF_DATA = "end_of_data"
@@ -142,7 +142,7 @@ class BacktestEngine:
         self.initial_quote = initial_quote
         self.position_size_quote = position_size_quote
 
-    def run(self, candles: list[Candle], config: EmaRsiConfig) -> BacktestResult:
+    def run(self, candles: list[Candle], config: StrategyConfig) -> BacktestResult:
         if len(candles) < 2:
             raise ValueError("A backtest needs at least 2 candles.")
         if any(not candle.is_complete for candle in candles):
@@ -157,6 +157,12 @@ class BacktestEngine:
         trades: list[TradeRecord] = []
         equity_curve: list[tuple[datetime, Decimal]] = []
         candles_in_market = 0
+        # Strategies declare the history they need; the live paper loop
+        # decides on exactly this window (engine seeds required_history).
+        # The backtest must use the same window semantics — a growing
+        # full-prefix window both diverges from live behavior (recursive
+        # indicators warm up differently) and makes every step O(n²).
+        required = self.strategy.required_history(config)
 
         for index, candle in enumerate(candles):
             if pending == SignalType.BUY and base_held == 0:
@@ -189,8 +195,8 @@ class BacktestEngine:
             equity_curve.append((candle.start_time, cash + base_held * candle.close))
 
             if index + 1 < len(candles):
-                window = candles[: index + 1]
-                if len(window) >= self.strategy.required_history(config):
+                window = candles[max(0, index + 1 - required) : index + 1]
+                if len(window) >= required:
                     position = StrategyPosition(
                         side="long" if base_held > 0 else "flat", size=base_held
                     )

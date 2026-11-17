@@ -27,6 +27,8 @@ const api = {
   runBacktest: (payload: Record<string, unknown>) =>
     ipcRenderer.invoke("backtest:run", payload),
   listBacktestRuns: () => ipcRenderer.invoke("backtest:runs"),
+  compareStrategies: (payload: Record<string, unknown>) =>
+    ipcRenderer.invoke("backtest:compare", payload),
   paperControl: (path: string, body: Record<string, unknown>) =>
     ipcRenderer.invoke("paper:control", { path, body }),
   getPaperStatus: () => ipcRenderer.invoke("paper:status"),

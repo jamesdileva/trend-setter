@@ -64,6 +64,15 @@ class PaperResetRequest(BaseModel):
     confirm: bool = Field(default=False, description="Must be true to actually reset.")
 
 
+class BacktestCompareRequest(BaseModel):
+    """Strategy comparison request (small grids, out-of-sample ranking)."""
+
+    product_id: str = Field(description="Product to compare on, e.g. BTC-USD")
+    timeframe: str = Field(description="Candle timeframe, e.g. 1h")
+    start: str | None = Field(default=None, description="ISO start date (UTC)")
+    end: str | None = Field(default=None, description="ISO end date (UTC)")
+
+
 class EmailSettingsRequest(BaseModel):
     """Email notification settings. The password is write-only: it is stored
     in the OS credential store and never returned by any endpoint."""

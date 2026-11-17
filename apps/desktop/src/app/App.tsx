@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { EngineStatus, MarketDataStatus } from "../types/electron";
 import { getDesktopApi } from "../services/desktopApi";
 import { BacktestCard } from "../components/BacktestCard";
+import { StrategyCompareCard } from "../components/StrategyCompareCard";
 import { CandleChart } from "../components/CandleChart";
 import { ConnectionCard } from "../components/ConnectionCard";
 import { NotificationsCard } from "../components/NotificationsCard";
@@ -123,6 +124,8 @@ export function App() {
       <StrategyCard />
 
       <BacktestCard />
+
+      <StrategyCompareCard />
 
       <ConnectionCard />
 

@@ -7,7 +7,6 @@ simulation with its assumptions and limitations.
 
 from __future__ import annotations
 
-from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -21,7 +20,7 @@ from trendbot.database.repositories import (
 )
 from trendbot.database.session import Database
 from trendbot.market_data.granularity import granularity_for_timeframe
-from trendbot.strategies.config import STRATEGY_NAME, EmaRsiConfig
+from trendbot.strategies.config import STRATEGY_NAME, StrategyConfig
 from trendbot.strategies.registry import get_strategy
 
 SIMULATION_WARNING = (
@@ -43,17 +42,22 @@ def run_backtest_over_store(
     timeframe: str,
     start: datetime | None = None,
     end: datetime | None = None,
-    config: EmaRsiConfig | None = None,
+    config: StrategyConfig,
     assumptions: FeeAssumptions | None = None,
     initial_quote: Decimal = Decimal("1000"),
     position_size_quote: Decimal = Decimal("500"),
     in_sample_fraction: float = 0.7,
+    strategy_name: str = STRATEGY_NAME,
+    persist: bool = True,
 ) -> dict[str, object]:
-    """Run and persist one simulation over the stored candle range."""
-    config = config or EmaRsiConfig(product_id=product_id, timeframe=timeframe)
+    """Run one simulation over the stored candle range.
+
+    ``persist=False`` (used by comparison sweeps) skips the backtest_runs
+    table so a multi-run sweep does not flood the runs history.
+    """
     config.require_valid()
     assumptions = assumptions or FeeAssumptions()
-    strategy = get_strategy(STRATEGY_NAME)
+    strategy = get_strategy(strategy_name)
     granularity = granularity_for_timeframe(timeframe)
 
     candle_repo = CandleRepository(database)
@@ -87,11 +91,14 @@ def run_backtest_over_store(
     in_result = engine.run(in_sample, config)
     out_result = engine.run(out_of_sample, config)
 
-    config_row = StrategyConfigRepository(database).get_or_create(
-        name=STRATEGY_NAME, config_json=asdict(config), config_hash=config.config_hash()
-    )
     repo = BacktestRepository(database)
-    run_id = repo.record_run(
+    run_id: int | None = None
+    config_row = None
+    if persist:
+        config_row = StrategyConfigRepository(database).get_or_create(
+            name=strategy_name, config_json=config.to_dict(), config_hash=config.config_hash()
+        )
+        run_id = repo.record_run(
         strategy_config_id=config_row.id,
         product_id=product_id,
         timeframe=timeframe,
@@ -113,8 +120,9 @@ def run_backtest_over_store(
             "in_sample_fraction": in_sample_fraction,
         },
     )
-    for trade in result.trades:
-        repo.record_trade(run_id, trade)
+    if persist and run_id is not None:
+        for trade in result.trades:
+            repo.record_trade(run_id, trade)
 
     return {
         "status": "simulation_complete",

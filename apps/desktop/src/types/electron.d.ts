@@ -102,6 +102,7 @@ export interface DesktopApi {
   evaluateStrategy(payload: Record<string, unknown>): Promise<EngineResponse | null>;
   runBacktest(payload: Record<string, unknown>): Promise<EngineResponse | null>;
   listBacktestRuns(): Promise<EngineResponse | null>;
+  compareStrategies(payload: Record<string, unknown>): Promise<EngineResponse | null>;
   paperControl(path: string, body: Record<string, unknown>): Promise<EngineResponse | null>;
   getPaperStatus(): Promise<EngineResponse | null>;
   getCandles(timeframe: string): Promise<EngineResponse | null>;

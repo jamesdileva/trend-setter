@@ -45,9 +45,22 @@ class ScriptedStrategy(Strategy):
     name = "scripted"
     version = "0.0.1"
 
-    def __init__(self, actions: dict[int, str], *, record: list | None = None) -> None:
+    def __init__(
+        self,
+        actions: dict[int, str],
+        *,
+        record: list | None = None,
+        candle_times: list | None = None,
+    ) -> None:
         self._actions = actions
         self._record = record
+        # The engine passes a window capped at required_history, so the
+        # absolute index must come from the candle's start time, not len().
+        self._index_of: dict = (
+            {candle_time: index for index, candle_time in enumerate(candle_times)}
+            if candle_times is not None
+            else {}
+        )
 
     def validate_config(self, config: object) -> None:
         return None
@@ -61,7 +74,10 @@ class ScriptedStrategy(Strategy):
         config: object,
         position: StrategyPosition | None = None,
     ) -> StrategyDecision:
-        index = len(candles) - 1
+        if self._index_of:
+            index = self._index_of[candles[-1].start_time]
+        else:
+            index = len(candles) - 1
         signal = SignalType(self._actions.get(index, "hold"))
         if self._record is not None:
             self._record.append((index, signal))
@@ -105,10 +121,13 @@ def run_with(
     slippage_bps: float = 0.0,
 ) -> object:
     config = EmaRsiConfig(product_id="BTC-USD", timeframe="1h")
-    scripted = ScriptedStrategy(actions, record=record)
+    candles = candles_from(opens_closes)
+    scripted = ScriptedStrategy(
+        actions, record=record, candle_times=[candle.start_time for candle in candles]
+    )
     runner = engine(fee_bps=fee_bps, slippage_bps=slippage_bps)
     runner.strategy = scripted
-    return runner.run(candles_from(opens_closes), config)
+    return runner.run(candles, config)
 
 
 class TestHandScenarios:
@@ -179,7 +198,6 @@ class TestHandScenarios:
 
 class TestLookAhead:
     def test_decisions_before_a_future_candle_never_change(self):
-        prefix = candles_from([(100, 100), (110, 110), (90, 90), (100, 100)])
         extra = Candle(
             product_id="BTC-USD",
             granularity="ONE_HOUR",
@@ -197,13 +215,17 @@ class TestLookAhead:
             [(100, 100), (110, 110), (90, 90), (100, 100)],
             record=record_prefix,
         )
+        # Both runs share the same prefix candles; a decision at index i uses
+        # at most the last `required_history` candles, all present in both
+        # runs → appending a future candle cannot change past decisions.
         runner = engine()
-        runner.strategy = ScriptedStrategy({0: "buy", 1: "sell"}, record=record_full)
-        runner.run(
-            [*prefix, extra], EmaRsiConfig(product_id="BTC-USD", timeframe="1h")
+        prefix_candles = candles_from([(100, 100), (110, 110), (90, 90), (100, 100)])
+        runner.strategy = ScriptedStrategy(
+            {0: "buy", 1: "sell"},
+            record=record_full,
+            candle_times=[c.start_time for c in [*prefix_candles, extra]],
         )
-        # Decisions on windows of length 1..4 are identical whether or not
-        # the future candle exists → no look-ahead.
+        runner.run([*prefix_candles, extra], EmaRsiConfig(product_id="BTC-USD", timeframe="1h"))
         assert record_prefix == record_full[: len(record_prefix)]
 
     def test_same_inputs_produce_identical_results(self):

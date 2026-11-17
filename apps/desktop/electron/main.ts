@@ -101,6 +101,9 @@ if (!gotLock) {
       supervisor?.engineRequest("/backtest/run", "POST", payload),
     );
     ipcMain.handle("backtest:runs", () => supervisor?.engineRequest("/backtest/runs"));
+    ipcMain.handle("backtest:compare", (_event, payload: Record<string, unknown>) =>
+      supervisor?.engineRequest("/backtest/compare", "POST", payload),
+    );
     ipcMain.handle("paper:control", (_event, payload: { path: string; body: Record<string, unknown> }) =>
       supervisor?.engineRequest(payload.path, "POST", payload.body),
     );

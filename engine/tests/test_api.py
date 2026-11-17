@@ -190,3 +190,78 @@ class TestNotificationsEndpoints:
             assert client.post(
                 "/notifications/email/test", headers=headers
             ).status_code == 503
+
+
+class TestBacktestCompareEndpoint:
+    """Strategy comparison endpoint: token-gated, advisory only (Sprint 16)."""
+
+    def seed_year(self, database):
+        from datetime import timedelta
+        from decimal import Decimal
+
+        from trendbot.database.repositories import CandleRepository
+        from trendbot.market_data.candles import Candle
+
+        candles = []
+        level = Decimal(100)
+        for index in range(400):
+            level = (
+                level * Decimal("1.001")
+                if index < 240
+                else level * (Decimal("1.004") if index % 2 else Decimal("0.996"))
+            )
+            candles.append(
+                Candle(
+                    product_id="BTC-USD",
+                    granularity="ONE_HOUR",
+                    start_time=datetime(2025, 1, 1, tzinfo=UTC) + timedelta(hours=index),
+                    open=level,
+                    high=level * Decimal("1.002"),
+                    low=level * Decimal("0.998"),
+                    close=level,
+                    volume=Decimal(1),
+                )
+            )
+        CandleRepository(database).upsert_many(candles)
+
+    def test_compare_requires_the_session_token(self, api_database, api_secrets):
+        with make_client(
+            token=None, database=api_database, secret_store=api_secrets
+        ) as client:
+            response = client.post(
+                "/backtest/compare",
+                json={"product_id": "BTC-USD", "timeframe": "1h"},
+                headers={"X-Local-Token": "anything"},
+            )
+        assert response.status_code == 503
+
+    def test_compare_ranks_registered_strategies_with_benchmark(self, api_database, api_secrets):
+        self.seed_year(api_database)
+        with make_client(
+            token="s3cret", database=api_database, secret_store=api_secrets
+        ) as client:
+            response = client.post(
+                "/backtest/compare",
+                json={"product_id": "BTC-USD", "timeframe": "1h"},
+                headers={"X-Local-Token": "s3cret"},
+            )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["status"] == "comparison_complete"
+        names = {row["strategy_name"] for row in body["ranking"]}
+        assert names == {"ema_rsi_baseline", "donchian_breakout"}
+        assert body["benchmark"]["strategy_name"] == "buy_and_hold_benchmark"
+        oos = [float(row["oos_net_return_pct"]) for row in body["ranking"]]
+        assert oos == sorted(oos, reverse=True)
+
+    def test_compare_without_history_is_a_plain_language_409(self, api_database, api_secrets):
+        with make_client(
+            token="s3cret", database=api_database, secret_store=api_secrets
+        ) as client:
+            response = client.post(
+                "/backtest/compare",
+                json={"product_id": "BTC-USD", "timeframe": "1h"},
+                headers={"X-Local-Token": "s3cret"},
+            )
+        assert response.status_code == 409
+        assert "candles" in response.json()["message"]

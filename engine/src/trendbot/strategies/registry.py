@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from trendbot.strategies.base import Strategy
-from trendbot.strategies.config import STRATEGY_NAME
+from trendbot.strategies.config import DONCHIAN_STRATEGY_NAME, STRATEGY_NAME
+from trendbot.strategies.donchian import DonchianStrategy
 from trendbot.strategies.ema_rsi import EmaRsiStrategy
 
 _REGISTRY: dict[str, type[Strategy]] = {
     STRATEGY_NAME: EmaRsiStrategy,
+    DONCHIAN_STRATEGY_NAME: DonchianStrategy,
 }
 
 

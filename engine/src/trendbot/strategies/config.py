@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
+from typing import Protocol
 
 # Initial supported set from architecture.md §2 and §7.
 SUPPORTED_PRODUCTS: tuple[str, ...] = ("BTC-USD", "ETH-USD")
@@ -31,10 +32,34 @@ MIN_RSI_PERIOD = 2
 MAX_RSI_PERIOD = 200
 
 STRATEGY_NAME = "ema_rsi_baseline"
+DONCHIAN_STRATEGY_NAME = "donchian_breakout"
 
 
 class StrategyConfigError(ValueError):
     """Raised when a strategy configuration is invalid."""
+
+
+class StrategyConfig(Protocol):
+    """The config surface every strategy configuration provides.
+
+    Strategies receive ``object`` configs and narrow to their own type; the
+    pipeline (backtester, paper loop, storage) only relies on this surface.
+    Members are read-only properties so frozen dataclasses satisfy it.
+    """
+
+    @property
+    def product_id(self) -> str: ...
+
+    @property
+    def timeframe(self) -> str: ...
+
+    def validate(self) -> list[str]: ...
+
+    def require_valid(self) -> None: ...
+
+    def config_hash(self) -> str: ...
+
+    def to_dict(self) -> dict[str, object]: ...
 
 
 @dataclass(frozen=True)
@@ -114,6 +139,11 @@ class EmaRsiConfig:
 
         return problems
 
+    def to_dict(self) -> dict[str, object]:
+        from dataclasses import asdict
+
+        return asdict(self)
+
     def require_valid(self) -> None:
         """Raise :class:`StrategyConfigError` listing every problem, if invalid."""
         problems = self.validate()
@@ -155,3 +185,93 @@ def _check_period(label: str, value: object, minimum: int, maximum: int) -> list
     if not minimum <= value <= maximum:
         return [f"The {label} must be between {minimum} and {maximum}."]
     return []
+
+
+@dataclass(frozen=True)
+class DonchianConfig:
+    """Configuration for the Donchian-channel breakout strategy.
+
+    BUY when the close exceeds the highest high of the prior ``entry_lookback``
+    candles; SELL when the close falls below the lowest low of the prior
+    ``exit_lookback`` candles (turtle-style: the exit channel is shorter than
+    the entry channel). The EMA/RSI fields of the baseline do not apply.
+    """
+
+    product_id: str
+    timeframe: str
+    entry_lookback: int = 20
+    exit_lookback: int = 10
+
+    MIN_ENTRY = 5
+    MAX_ENTRY = 200
+    MIN_EXIT = 2
+    MAX_EXIT = 100
+
+    def validate(self) -> list[str]:
+        problems: list[str] = []
+
+        if self.product_id not in SUPPORTED_PRODUCTS:
+            problems.append(
+                f"Product {self.product_id!r} is not supported. "
+                f"Supported products: {', '.join(SUPPORTED_PRODUCTS)}."
+            )
+        if self.timeframe not in SUPPORTED_TIMEFRAMES:
+            problems.append(
+                f"Timeframe {self.timeframe!r} is not supported. "
+                f"Supported timeframes: {', '.join(SUPPORTED_TIMEFRAMES)}."
+            )
+        if not isinstance(self.entry_lookback, int) or isinstance(self.entry_lookback, bool):
+            problems.append(
+                f"The entry lookback must be a whole number between "
+                f"{self.MIN_ENTRY} and {self.MAX_ENTRY}."
+            )
+        elif not self.MIN_ENTRY <= self.entry_lookback <= self.MAX_ENTRY:
+            problems.append(
+                f"The entry lookback must be between {self.MIN_ENTRY} and {self.MAX_ENTRY}."
+            )
+        if not isinstance(self.exit_lookback, int) or isinstance(self.exit_lookback, bool):
+            problems.append(
+                f"The exit lookback must be a whole number between "
+                f"{self.MIN_EXIT} and {self.MAX_EXIT}."
+            )
+        elif not self.MIN_EXIT <= self.exit_lookback <= self.MAX_EXIT:
+            problems.append(
+                f"The exit lookback must be between {self.MIN_EXIT} and {self.MAX_EXIT}."
+            )
+        if (
+            isinstance(self.entry_lookback, int)
+            and isinstance(self.exit_lookback, int)
+            and not isinstance(self.entry_lookback, bool)
+            and not isinstance(self.exit_lookback, bool)
+            and self.exit_lookback >= self.entry_lookback
+        ):
+            problems.append(
+                "The exit lookback must be shorter than the entry lookback "
+                f"(exit: {self.exit_lookback}, entry: {self.entry_lookback})."
+            )
+        return problems
+
+    def to_dict(self) -> dict[str, object]:
+        from dataclasses import asdict
+
+        return asdict(self)
+
+    def require_valid(self) -> None:
+        problems = self.validate()
+        if problems:
+            raise StrategyConfigError(" ".join(problems))
+
+    def config_hash(self) -> str:
+        """Stable SHA-256 identity of this configuration's decision-relevant fields."""
+        canonical = json.dumps(
+            {
+                "name": DONCHIAN_STRATEGY_NAME,
+                "entry_lookback": self.entry_lookback,
+                "exit_lookback": self.exit_lookback,
+                "product_id": self.product_id,
+                "timeframe": self.timeframe,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
