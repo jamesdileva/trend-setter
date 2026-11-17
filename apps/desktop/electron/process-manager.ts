@@ -48,9 +48,13 @@ const OUTPUT_TAIL_CHARS = 4000;
 const TAIL_IN_ERROR_CHARS = 600;
 // How long start() may take to first healthy response (PyInstaller cold
 // start plus first-run migrations on a fresh machine), and how many
-// consecutive missed health checks while running mark the engine unresponsive.
+// consecutive missed health checks while running mark the engine
+// unresponsive. The threshold must be generous: waking from sleep, the
+// engine resumes into a reconnect + REST backfill storm and can starve
+// /health for tens of seconds — killing it there is a false positive
+// (observed 2026-11-17: standby at 13:40, wake killed the engine).
 const START_DEADLINE_MS = 90_000;
-const MAX_MISSED_HEALTH_CHECKS = 3;
+const MAX_MISSED_HEALTH_CHECKS = 20;
 
 /**
  * Keeps the last `limit` characters of a stream so drained engine output can
@@ -322,11 +326,15 @@ export class EngineSupervisor {
         }
         return;
       }
-      // Was running: a few consecutive misses mean the engine stopped responding.
+      // Was running: sustained unresponsiveness means the engine stopped
+      // responding. Sleep/wake is the benign case (the engine catches up);
+      // a frozen event loop never recovers either way.
       if (this.missedHealthChecks >= MAX_MISSED_HEALTH_CHECKS) {
         this.failUnresponsive(
-          `engine stopped responding (health check: ${message}). ` +
-            "Stop the engine, then start it again to recover.",
+          `engine stopped responding (health check: ${message}). This can happen ` +
+            "right after the computer wakes from sleep — the engine may still be " +
+            "catching up. If it stays in this state, stop the engine, then start " +
+            "it again to recover.",
         );
         return;
       }

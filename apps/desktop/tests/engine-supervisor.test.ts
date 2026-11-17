@@ -144,7 +144,7 @@ describe("EngineSupervisor health escalation", () => {
     }
   });
 
-  it("escalates to engine error after three consecutive missed checks while running", async () => {
+  it("escalates to engine error after sustained missed checks while running", async () => {
     const supervisor = supervisorWithFailingHealth();
     try {
       const internal = supervisor as unknown as {
@@ -157,15 +157,19 @@ describe("EngineSupervisor health escalation", () => {
       internal.lastHealthyAt = Date.now() - 60_000; // was healthy, then went quiet
       (supervisor as unknown as { status: { state: string } }).status.state = "running";
       const poll = internal.pollHealth.bind(supervisor);
-      await poll();
-      expect(supervisor.getStatus().state).toBe("starting"); // grace window
-      await poll();
-      expect(supervisor.getStatus().state).toBe("starting");
+      // Below the threshold: stays in the grace window (generous enough to
+      // survive wake-from-sleep, when the engine resumes into a backfill
+      // storm and can starve /health for tens of seconds).
+      for (let missed = 1; missed < 20; missed += 1) {
+        await poll();
+        expect(supervisor.getStatus().state).toBe("starting");
+      }
+      // At the threshold: engine error with recovery instructions.
       await poll();
       const status = supervisor.getStatus();
       expect(status.state).toBe("crashed");
       expect(status.lastError).toContain("engine stopped responding");
-      expect(status.lastError).toContain("Stop the engine, then start it again");
+      expect(status.lastError).toContain("wakes from sleep");
       expect((supervisor as unknown as { child: unknown }).child).toBeNull();
     } finally {
       (supervisor as unknown as { restoreFetch: () => void }).restoreFetch();
