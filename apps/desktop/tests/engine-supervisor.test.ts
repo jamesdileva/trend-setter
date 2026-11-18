@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import os from "node:os";
 import path from "node:path";
 import {
   EngineSupervisor,
@@ -89,13 +90,19 @@ describe("OutputTail", () => {
 });
 
 describe("EngineSupervisor health escalation", () => {
-  function supervisorWithFailingHealth(
-    logFile?: string,
-  ): EngineSupervisor & { restoreFetch: () => void } {
+  function supervisorWithFailingHealth(): EngineSupervisor & {
+    restoreFetch: () => void;
+    logFile: string;
+  } {
+    // Hermetic log: CI filesystems may not allow writes to arbitrary paths.
+    const logFile = path.join(
+      os.tmpdir(),
+      `supervisor-test-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`,
+    );
     const supervisor = new EngineSupervisor({
       repoRoot: path.join("/repo"),
       port: 8788,
-      ...(logFile ? { logFile } : {}),
+      logFile,
     });
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (() =>
@@ -110,6 +117,7 @@ describe("EngineSupervisor health escalation", () => {
       restoreFetch: () => {
         globalThis.fetch = originalFetch;
       },
+      logFile,
     });
   }
 
@@ -178,12 +186,7 @@ describe("EngineSupervisor health escalation", () => {
   });
 
   it("escalates to engine error after sustained missed checks while running", async () => {
-    const logFile = path.join(
-      "/repo",
-      "supervisor-test",
-      `log-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`,
-    );
-    const supervisor = supervisorWithFailingHealth(logFile);
+    const supervisor = supervisorWithFailingHealth();
     try {
       const internal = supervisor as unknown as {
         startedAt: number;
@@ -212,8 +215,8 @@ describe("EngineSupervisor health escalation", () => {
       // The kill is persisted with evidence for post-mortems (two real
       // incidents left none because TerminateProcess writes no records).
       const fs = await import("node:fs");
-      expect(fs.existsSync(logFile)).toBe(true);
-      const log = fs.readFileSync(logFile, "utf8");
+      expect(fs.existsSync(supervisor.logFile)).toBe(true);
+      const log = fs.readFileSync(supervisor.logFile, "utf8");
       expect(log).toContain("watchdog: engine stopped responding");
     } finally {
       (supervisor as unknown as { restoreFetch: () => void }).restoreFetch();
