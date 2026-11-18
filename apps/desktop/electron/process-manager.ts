@@ -55,6 +55,8 @@ const TAIL_IN_ERROR_CHARS = 600;
 // (observed 2026-11-17: standby at 13:40, wake killed the engine).
 const START_DEADLINE_MS = 90_000;
 const MAX_MISSED_HEALTH_CHECKS = 20;
+// Supervisor log ceiling: lifecycle lines plus engine output tails.
+const SUPERVISOR_LOG_CHARS = 256_000;
 
 /**
  * Keeps the last `limit` characters of a stream so drained engine output can
@@ -122,6 +124,7 @@ export class EngineSupervisor {
   private readonly port: number;
   private readonly baseUrl: string;
   private readonly spawnConfig: EngineSpawnConfig;
+  private readonly logFilePath: string;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private status: EngineStatus = { state: "stopped", health: null, lastError: null };
   private startedAt = 0;
@@ -135,10 +138,19 @@ export class EngineSupervisor {
     platform?: NodeJS.Platform;
     port?: number;
     packagedEnginePath?: string;
+    logFile?: string;
   }) {
     this.port = options.port ?? DEFAULT_PORT;
     this.baseUrl = `http://127.0.0.1:${this.port}`;
     this.spawnConfig = resolveEngineSpawnConfig({ ...options, port: this.port, token: this.token });
+    this.logFilePath =
+      options.logFile ??
+      path.join(
+        process.env.LOCALAPPDATA ?? path.join(os.homedir(), "AppData", "Local"),
+        "trend-setter",
+        "logs",
+        "supervisor.log",
+      );
     // Diagnostic: log the spawn config for debugging packaged builds
     try {
       const diagPath = path.join(os.tmpdir(), "trend-setter-spawn-config.json");
@@ -195,6 +207,28 @@ export class EngineSupervisor {
     return { status: response.status, body: parsed };
   }
 
+  /**
+   * Persist one lifecycle line to the supervisor log (bounded file). The
+   * engine's drained output tails ride along on exit/kill so post-mortems
+   * have real evidence instead of guesswork — the DB cannot distinguish a
+   * watchdog kill from a clean exit, and Windows records neither.
+   */
+  private logLine(line: string): void {
+    try {
+      fs.mkdirSync(path.dirname(this.logFilePath), { recursive: true });
+      let current = "";
+      try {
+        current = fs.readFileSync(this.logFilePath, "utf8");
+      } catch {
+        // first write
+      }
+      const stamped = `${new Date().toISOString()} ${line}`;
+      fs.writeFileSync(this.logFilePath, (current + stamped + "\n").slice(-SUPERVISOR_LOG_CHARS));
+    } catch {
+      // diagnostics are best effort
+    }
+  }
+
   async start(): Promise<EngineStatus> {
     if (this.child) {
       return this.status; // duplicate-instance guard: one engine at a time
@@ -210,6 +244,7 @@ export class EngineSupervisor {
       stdio: ["ignore", "pipe", "pipe"],
     });
     this.child = child;
+    this.logLine(`engine spawned: ${this.spawnConfig.command} ${this.spawnConfig.args.join(" ")}`);
     // Drain the engine's output streams. Without readers the OS pipe buffer
     // fills and the engine blocks forever on its next write (frozen API).
     child.stdout?.on("data", (chunk: Buffer) => this.stdoutTail?.append(chunk));
@@ -220,6 +255,7 @@ export class EngineSupervisor {
       }
       this.child = null;
       this.stopPolling();
+      this.logLine(`engine failed to start: ${err.message}`);
       this.status = {
         state: "crashed",
         health: null,
@@ -235,8 +271,12 @@ export class EngineSupervisor {
       this.stopping = false;
       this.child = null;
       if (wasStopping) {
+        this.logLine(`engine exited cleanly (code ${code ?? "unknown"}) after stop request`);
         this.status = { state: "stopped", health: null, lastError: null };
       } else {
+        this.logLine(
+          `engine exited unexpectedly (code ${code ?? "unknown"})${this.describeOutputTail()}`,
+        );
         this.status = {
           state: "crashed",
           health: null,
@@ -255,6 +295,7 @@ export class EngineSupervisor {
       return this.status;
     }
     this.stopping = true;
+    this.logLine("engine stop requested");
     this.status = { state: "stopping", health: null, lastError: null };
     await new Promise<void>((resolve) => {
       const escalation = setTimeout(() => {
@@ -355,6 +396,7 @@ export class EngineSupervisor {
    * stale and does not overwrite the diagnostic status.
    */
   private failUnresponsive(message: string): void {
+    this.logLine(`watchdog: ${message}${this.describeOutputTail()}`);
     this.status = { state: "crashed", health: null, lastError: `${message}${this.describeOutputTail()}` };
     const child = this.child;
     this.child = null;

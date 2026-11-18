@@ -61,7 +61,10 @@ class PaperLoopRunner:
             while not self._stop_requested:
                 await asyncio.sleep(self._poll_seconds)
                 try:
-                    self.cycle()
+                    # The cycle does synchronous SQLite work; running it in a
+                    # worker thread keeps the event loop (API, health checks,
+                    # feed) responsive even under writer contention.
+                    await asyncio.to_thread(self.cycle)
                 except Exception as exc:  # noqa: BLE001 - the loop must survive
                     self.status.details["last_error"] = str(exc)
                     if self._notifier is not None:

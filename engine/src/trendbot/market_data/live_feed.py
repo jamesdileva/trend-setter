@@ -127,6 +127,13 @@ class CandleFeed:
         self._connected_at: datetime | None = None
         self._consecutive_failures = 0
         self._gap_keys: set[str] = set()
+        # Single-flight per product: during a reconnect storm each cycle
+        # would otherwise schedule another REST backfill (dozens of
+        # concurrent rate-limited imports). Overlaps are wasted work — gap
+        # ranges always re-derive from the last stored candle, and imports
+        # are idempotent — so one backfill per product at a time is both
+        # sufficient and protective (Sprint 16 follow-up).
+        self._backfill_inflight: set[str] = set()
 
     async def run(self) -> None:
         """Run until :meth:`stop`. Reconnects forever with bounded backoff."""
@@ -228,6 +235,8 @@ class CandleFeed:
                 self._emit_gap(product_id, gap_start, now)
 
     def _emit_gap(self, product_id: str, gap_start: datetime, gap_end: datetime) -> None:
+        if product_id in self._backfill_inflight:
+            return  # one backfill per product; ranges re-derive on completion
         dedupe_key = f"ws-gap-{product_id}-{self.granularity}-{int(gap_start.timestamp())}"
         if dedupe_key in self._gap_keys:
             return
@@ -240,6 +249,8 @@ class CandleFeed:
         if self._on_gap is None:
             return
 
+        self._backfill_inflight.add(product_id)
+
         async def run_gap() -> None:
             try:
                 await self._on_gap(product_id, self.timeframe, gap_start, gap_end)  # type: ignore[misc]
@@ -249,6 +260,8 @@ class CandleFeed:
                     f"Backfill failed for {product_id}: {exc}",
                     dedupe_key=f"{dedupe_key}-failed-{uuid.uuid4().hex[:8]}",
                 )
+            finally:
+                self._backfill_inflight.discard(product_id)
 
         asyncio.get_running_loop().create_task(run_gap())
 

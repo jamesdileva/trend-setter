@@ -89,8 +89,14 @@ describe("OutputTail", () => {
 });
 
 describe("EngineSupervisor health escalation", () => {
-  function supervisorWithFailingHealth(): EngineSupervisor & { restoreFetch: () => void } {
-    const supervisor = new EngineSupervisor({ repoRoot: path.join("/repo"), port: 8788 });
+  function supervisorWithFailingHealth(
+    logFile?: string,
+  ): EngineSupervisor & { restoreFetch: () => void } {
+    const supervisor = new EngineSupervisor({
+      repoRoot: path.join("/repo"),
+      port: 8788,
+      ...(logFile ? { logFile } : {}),
+    });
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (() =>
       Promise.reject(new Error("The operation was aborted due to timeout"))) as typeof fetch;
@@ -145,7 +151,12 @@ describe("EngineSupervisor health escalation", () => {
   });
 
   it("escalates to engine error after sustained missed checks while running", async () => {
-    const supervisor = supervisorWithFailingHealth();
+    const logFile = path.join(
+      "/repo",
+      "supervisor-test",
+      `log-${Date.now()}-${Math.random().toString(16).slice(2)}.txt`,
+    );
+    const supervisor = supervisorWithFailingHealth(logFile);
     try {
       const internal = supervisor as unknown as {
         startedAt: number;
@@ -171,6 +182,12 @@ describe("EngineSupervisor health escalation", () => {
       expect(status.lastError).toContain("engine stopped responding");
       expect(status.lastError).toContain("wakes from sleep");
       expect((supervisor as unknown as { child: unknown }).child).toBeNull();
+      // The kill is persisted with evidence for post-mortems (two real
+      // incidents left none because TerminateProcess writes no records).
+      const fs = await import("node:fs");
+      expect(fs.existsSync(logFile)).toBe(true);
+      const log = fs.readFileSync(logFile, "utf8");
+      expect(log).toContain("watchdog: engine stopped responding");
     } finally {
       (supervisor as unknown as { restoreFetch: () => void }).restoreFetch();
     }
