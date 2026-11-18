@@ -133,7 +133,9 @@ describe("EngineSupervisor health escalation", () => {
   it("marks a never-healthy engine failed once the start deadline passes", async () => {
     const supervisor = supervisorWithFailingHealth();
     try {
-      (supervisor as unknown as { startedAt: number }).startedAt = Date.now() - 91_000;
+      // The stub fetch rejects with a TIMEOUT (port open, no answer) — the
+      // genuinely unhealthy start case. 121s > the 120s deadline.
+      (supervisor as unknown as { startedAt: number }).startedAt = Date.now() - 121_000;
       (supervisor as unknown as { lastHealthyAt: number | null }).lastHealthyAt = null;
       const poll = (
         supervisor as unknown as { pollHealth: () => Promise<void> }
@@ -141,10 +143,35 @@ describe("EngineSupervisor health escalation", () => {
       await poll();
       const status = supervisor.getStatus();
       expect(status.state).toBe("crashed");
-      expect(status.lastError).toContain("did not become healthy within 90 seconds");
+      expect(status.lastError).toContain("opened its port but never answered within 120 seconds");
       expect(status.lastError).toContain("Stop the engine, then start it again");
       // The frozen child is detached so Start works without a manual stop.
       expect((supervisor as unknown as { child: unknown }).child).toBeNull();
+    } finally {
+      (supervisor as unknown as { restoreFetch: () => void }).restoreFetch();
+    }
+  });
+
+  it("keeps waiting while a first-run engine is still booting (connection refused)", async () => {
+    const supervisor = supervisorWithFailingHealth();
+    try {
+      globalThis.fetch = (() =>
+        Promise.reject(new TypeError("fetch failed: connect ECONNREFUSED 127.0.0.1:8788"))) as typeof fetch;
+      (supervisor as unknown as { startedAt: number }).startedAt = Date.now() - 121_000;
+      (supervisor as unknown as { lastHealthyAt: number | null }).lastHealthyAt = null;
+      (supervisor as unknown as { status: { state: string } }).status.state = "starting";
+      const poll = (
+        supervisor as unknown as { pollHealth: () => Promise<void> }
+      ).pollHealth.bind(supervisor);
+      await poll();
+      // Refused = still booting (e.g. antivirus scanning a fresh install):
+      // past the timeout deadline but patient — only the refused cap applies.
+      expect(supervisor.getStatus().state).toBe("starting");
+      (supervisor as unknown as { startedAt: number }).startedAt = Date.now() - 601_000;
+      await poll();
+      const status = supervisor.getStatus();
+      expect(status.state).toBe("crashed");
+      expect(status.lastError).toContain("has not opened its port after 600 seconds");
     } finally {
       (supervisor as unknown as { restoreFetch: () => void }).restoreFetch();
     }

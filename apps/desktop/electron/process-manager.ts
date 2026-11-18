@@ -46,14 +46,17 @@ const ENGINE_REQUEST_TIMEOUT_MS = 10_000;
 // output is drained into a bounded tail and surfaced in error messages.
 const OUTPUT_TAIL_CHARS = 4000;
 const TAIL_IN_ERROR_CHARS = 600;
-// How long start() may take to first healthy response (PyInstaller cold
-// start plus first-run migrations on a fresh machine), and how many
-// consecutive missed health checks while running mark the engine
-// unresponsive. The threshold must be generous: waking from sleep, the
-// engine resumes into a reconnect + REST backfill storm and can starve
-// /health for tens of seconds — killing it there is a false positive
-// (observed 2026-11-17: standby at 13:40, wake killed the engine).
-const START_DEADLINE_MS = 90_000;
+// Two distinct slow-start regimes (2026-11-18 incident: the watchdog killed
+// a first-run engine whose fresh PyInstaller build was being deep-scanned by
+// antivirus — connection time-outs before the port even answered):
+// - connection REFUSED = the port is not open yet: the process is still
+//   booting. Be patient — the exit handler catches real crashes, and a
+//   long absolute cap is the only bound.
+// - connection accepted but the request TIMES OUT = the port is open and
+//   the event loop is not answering: the genuinely unhealthy case. A
+//   bounded window of these (plus a wake-from-sleep grace) escalates.
+const START_DEADLINE_MS = 120_000;
+const START_REFUSED_CAP_MS = 600_000;
 const MAX_MISSED_HEALTH_CHECKS = 20;
 // Supervisor log ceiling: lifecycle lines plus engine output tails.
 const SUPERVISOR_LOG_CHARS = 256_000;
@@ -357,12 +360,20 @@ export class EngineSupervisor {
       }
       this.missedHealthChecks += 1;
       const message = err instanceof Error ? err.message : String(err);
+      // Distinguish "still booting" (connection refused — the port is not
+      // open yet; antivirus may be scanning a fresh install) from "listening
+      // but not answering" (timeouts — the genuinely unhealthy case).
+      const isTimeout = /aborted|timeout/i.test(message);
       if (this.lastHealthyAt === null) {
-        // Never healthy since start(): give cold starts the full deadline.
-        if (Date.now() - this.startedAt > START_DEADLINE_MS) {
+        const elapsed = Date.now() - this.startedAt;
+        const stalled = isTimeout && elapsed > START_DEADLINE_MS;
+        const neverOpened = !isTimeout && elapsed > START_REFUSED_CAP_MS;
+        if (stalled || neverOpened) {
+          const reason = neverOpened
+            ? `the engine has not opened its port after ${Math.round(START_REFUSED_CAP_MS / 1000)} seconds (still starting — this can happen while antivirus scans a fresh install; last check: ${message})`
+            : `the engine opened its port but never answered within ${Math.round(START_DEADLINE_MS / 1000)} seconds (last check: ${message})`;
           this.failUnresponsive(
-            `engine did not become healthy within ${Math.round(START_DEADLINE_MS / 1000)} seconds ` +
-              `(last check: ${message}). Stop the engine, then start it again.`,
+            `engine did not become healthy: ${reason}. Stop the engine, then start it again.`,
           );
         }
         return;
