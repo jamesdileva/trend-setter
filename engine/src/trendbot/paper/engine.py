@@ -234,10 +234,16 @@ class PaperTradingEngine:
 
     def _seed_window(self, latest: datetime) -> None:
         required = self.strategy.required_history(self.config)
-        window_start = latest - timedelta(seconds=(required - 1) * self.bucket_seconds)
-        self._window = self.candles.get_range(
+        # The stored series has holes (every feed gap leaves a missing hour),
+        # so a minimal 50-hour span can return fewer than `required` candles
+        # and the engine would report insufficient history forever (observed
+        # 2026-11-17..20). Take a 3x span and keep the newest `required`.
+        span = required * 3
+        window_start = latest - timedelta(seconds=span * self.bucket_seconds)
+        candles = self.candles.get_range(
             self.product_id, self.granularity, window_start, latest + timedelta(seconds=1)
         )
+        self._window = candles[-required:]
         # The newest candle is processed as a LIVE candle on the next call —
         # seeding must not consume the decision candle silently.
         self._last_processed = latest - timedelta(seconds=self.bucket_seconds)
@@ -246,6 +252,11 @@ class PaperTradingEngine:
         action: str | None = None
         self._window = [c for c in self._window if c.start_time < candle.start_time]
         self._window.append(candle)
+        # Keep the window at exactly `required` candles — the same window
+        # semantics the backtester uses, so live decisions match simulations.
+        required = self.strategy.required_history(self.config)
+        if len(self._window) > required:
+            self._window = self._window[-required:]
 
         # 1) execute pending orders at this candle's open (next-open model,
         #    consistent with the backtester's fee/slippage assumptions).

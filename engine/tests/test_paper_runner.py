@@ -210,3 +210,53 @@ class TestRollupIntegration:
         runner.cycle()
         assert runner.status.running is True
         assert runner.status.last_processed_candle is not None
+
+
+class TestSeedingWithHoles:
+    def test_seed_tolerates_missing_hours(self, db):
+        """Feed gaps leave holes in the derived series; the seed must still
+        produce a full window (regression: the engine reported
+        insufficient_history forever when the minimal span came up short)."""
+        from trendbot.database.repositories import CandleRepository
+
+        repo = CandleRepository(db)
+        StrategyEngine(db).set_config(
+            product_id="BTC-USD", timeframe="1h", rsi_entry_ceiling=97.0
+        )
+        # 200 contiguous hours, then delete 12 hours inside the seed span
+        # (a feed gap) — the last 51 candles remain intact.
+        clock0 = {"now": START + 201 * HOURLY}
+        runner = make_runner(db, clock=clock0)
+        step(db, runner, 201, clock0)
+        # Remove candles 60..71 (older than the last 51, inside the 3x span).
+        with db.session() as session:
+            from sqlalchemy import delete
+
+            from trendbot.database.models import CandleRecord
+
+            session.execute(
+                delete(CandleRecord).where(
+                    CandleRecord.product_id == "BTC-USD",
+                    CandleRecord.granularity == "ONE_HOUR",
+                    CandleRecord.start_time >= START + 60 * HOURLY,
+                    CandleRecord.start_time < START + 72 * HOURLY,
+                )
+            )
+        fresh_engine_window = len(
+            repo.get_range("BTC-USD", "ONE_HOUR", START, START + 201 * HOURLY)
+        )
+        assert fresh_engine_window == 189  # 12-hole gap created
+
+        # A rebuilt engine (restart) must seed a FULL window from the gappy
+        # series and decide on the next candle instead of stalling forever.
+        clock = {"now": START + 199 * HOURLY}
+        runner2 = make_runner(db, clock=clock)
+        runner2.cycle()  # rebuild + seed
+        assert runner2._engine is not None
+        assert len(runner2._engine._window) == 51
+        clock["now"] = START + 200 * HOURLY
+        runner2.cycle()  # processes the newest candle with the full window
+        # The decision is real — no more perpetual insufficient_history.
+        assert runner2.status.last_decision is not None
+        assert runner2.status.last_decision_reason != "insufficient_history"
+        assert runner2.status.last_processed_candle is not None
