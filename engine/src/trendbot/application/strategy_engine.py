@@ -133,7 +133,12 @@ class StrategyEngine:
             return self._no_data_decision(strategy, config, product, engine_timeframe)
 
         required = strategy.required_history(config)
-        window_start = latest - timedelta(seconds=(required - 1) * seconds)
+        # The stored series has holes (feed gaps leave missing hours), so a
+        # minimal span can come up short and every evaluation would report
+        # insufficient_history (observed 2026-11-20 on the manual path — the
+        # paper loop had the same bug). Take a 3x span, keep the newest.
+        span = required * 3
+        window_start = latest - timedelta(seconds=span * seconds)
         candles = self._candles.get_range(
             product, granularity, window_start, latest + timedelta(seconds=1)
         )

@@ -260,3 +260,34 @@ class TestSeedingWithHoles:
         assert runner2.status.last_decision is not None
         assert runner2.status.last_decision_reason != "insufficient_history"
         assert runner2.status.last_processed_candle is not None
+
+
+class TestManualEvaluateWithHoles:
+    def test_strategy_engine_evaluate_tolerates_missing_hours(self, db):
+        """The manual /strategy/evaluate path had the same hole bug as the
+        paper seed (observed 2026-11-20: 'have 41' forever)."""
+
+        from sqlalchemy import delete
+
+        from trendbot.database.models import CandleRecord
+        from trendbot.strategies.decisions import SignalType
+
+        repo = CandleRepository(db)
+        StrategyEngine(db).set_config(
+            product_id="BTC-USD", timeframe="1h", rsi_entry_ceiling=97.0
+        )
+        repo.upsert_many(candles_upto(201))
+        # Punch a 12-hour hole inside the minimal 50-hour span.
+        with db.session() as session:
+            session.execute(
+                delete(CandleRecord).where(
+                    CandleRecord.product_id == "BTC-USD",
+                    CandleRecord.granularity == "ONE_HOUR",
+                    CandleRecord.start_time >= START + 140 * HOURLY,
+                    CandleRecord.start_time < START + 152 * HOURLY,
+                )
+            )
+        engine = StrategyEngine(db)
+        decision = engine.evaluate("BTC-USD", "1h")
+        assert decision.signal in (SignalType.BUY, SignalType.SELL, SignalType.HOLD)
+        assert decision.reason_code != "insufficient_history"

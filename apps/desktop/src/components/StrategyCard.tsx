@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   PaperLoopStatus,
   StrategyConfigView,
@@ -32,6 +32,7 @@ export function StrategyCard() {
   const [config, setConfig] = useState<StrategyConfigView | null>(null);
   const [loop, setLoop] = useState<PaperLoopStatus | null>(null);
   const [draft, setDraft] = useState<Draft>(DEFAULT_DRAFT);
+  const draftLoaded = useRef(false);
   const [decision, setDecision] = useState<StrategyDecisionView | null>(null);
   const [notice, setNotice] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -41,26 +42,36 @@ export function StrategyCard() {
       return;
     }
     let cancelled = false;
-    void api
-      .getStrategyCurrent()
-      .then((response) => {
-        if (cancelled || !response || typeof response.body !== "object" || response.body === null) {
-          return;
-        }
-        const view = response.body as StrategyConfigView;
-        setConfig(view);
-        if (view.config) {
-          setDraft({
-            fast: String(view.config.fast_ema_period),
-            slow: String(view.config.slow_ema_period),
-            rsi: String(view.config.rsi_period),
-            ceiling: String(view.config.rsi_entry_ceiling),
-          });
-        }
-      })
-      .catch(() => undefined);
+    // The active config rarely changes, but recent_signals (the automated
+    // decision history) grows every candle — poll so the history stays live.
+    const refresh = (): void => {
+      void api
+        .getStrategyCurrent()
+        .then((response) => {
+          if (cancelled || !response || typeof response.body !== "object" || response.body === null) {
+            return;
+          }
+          const view = response.body as StrategyConfigView;
+          setConfig(view);
+          if (view.config && !draftLoaded.current) {
+            // Initialize the editable fields once; the poll must not clobber
+            // values the user is typing.
+            draftLoaded.current = true;
+            setDraft({
+              fast: String(view.config.fast_ema_period),
+              slow: String(view.config.slow_ema_period),
+              rsi: String(view.config.rsi_period),
+              ceiling: String(view.config.rsi_entry_ceiling),
+            });
+          }
+        })
+        .catch(() => undefined);
+    };
+    refresh();
+    const timer = setInterval(refresh, 60_000);
     return () => {
       cancelled = true;
+      clearInterval(timer);
     };
   }, [api]);
 
